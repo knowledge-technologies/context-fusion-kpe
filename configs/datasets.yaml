@@ -1,0 +1,8 @@
+datasets:
+
+  kp20k:
+    description: "KP20k large-scale keyphrase extraction dataset"
+    splits:
+      train: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_train.json?ref_type=heads&inline=false"
+      valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_valid.json?ref_type=heads&inline=false"
+      test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_test.json?ref_type=heads&inline=false"
