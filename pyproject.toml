@@ -1,0 +1,20 @@
+[project]
+name = "keyword-pecker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Kristijan Armeni", email = "kristijan.armeni@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+keyword-pecker = "keyword_pecker:main"
+
+[build-system]
+requires = ["uv_build>=0.9.16,<0.10.0"]
+build-backend = "uv_build"
