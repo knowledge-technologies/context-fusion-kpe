@@ -2,17 +2,10 @@
 repo = "https://github.com/astral-sh/ruff-pre-commit"
 rev = "v0.15.0"
 hooks = [
-    # Run the linter.
-    { id = "ruff", args = ["--fix"], types_or = ["python", "pyi"] },
-    # Run the formatter.
+    # Run the formatter first (includes import sorting)
     { id = "ruff-format", types_or = ["python", "pyi"] },
-]
-
-[[repos]]
-repo = "https://github.com/pycqa/isort"
-rev = "7.0.0"
-hooks = [
-    { id = "isort", name = "isort (python)" }
+    # Run the linter with fixes
+    { id = "ruff", args = ["--fix"], types_or = ["python", "pyi"] },
 ]
 
 [[repos]]
