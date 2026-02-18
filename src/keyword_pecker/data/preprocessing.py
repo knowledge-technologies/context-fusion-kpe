@@ -462,7 +462,7 @@ def process_document(
     return processed
 
 
-def process_file(
+def process_dataset(
     filepath: Path,
     nlp: spacy.Language,
     tokenizer: AutoTokenizer,

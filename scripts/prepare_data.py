@@ -38,7 +38,7 @@ from keyword_pecker.data import (
     get_derived_path,
     list_dataset_files,
     load_spacy_model,
-    process_file,
+    process_dataset,
     write_parquet,
 )
 from keyword_pecker.utils import load_config
@@ -161,7 +161,7 @@ def main() -> None:
 
         # Process file
         tqdm.write(f"  Processing {filepath.name}...")
-        processed_data = process_file(
+        processed_data = process_dataset(
             filepath=filepath,
             nlp=nlp,
             tokenizer=tokenizer,
