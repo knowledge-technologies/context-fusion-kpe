@@ -1,6 +1,6 @@
-# Keyword-Pecker
+# Keyword-pecker
 
-Transformer-based keyphrase extraction with refinement layers.
+Transformer-based keyphrase extraction model.
 
 ## Prerequisites
 
