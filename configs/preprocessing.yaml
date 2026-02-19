@@ -1,0 +1,36 @@
+# Preprocessing configuration for keyphrase extraction
+#
+# This file controls how raw JSON datasets are processed into
+# training-ready Parquet files.
+
+# Tokenizer configuration
+tokenizer:
+  model_name: "sentence-transformers/all-mpnet-base-v2"
+  max_length: 512
+  truncation: true
+  padding: true
+
+# Sentence segmentation using spaCy
+segmentation:
+  spacy_model: "en_core_web_sm"
+  exclude:
+    - "ner"
+    - "lemmatizer"
+    - "attribute_ruler"
+  batch_size: 50
+
+# Keyword matching configuration
+matching:
+  use_stemming: true
+  stemmer: "porter"
+  case_sensitive: false
+
+# Processing options
+processing:
+  device: "cpu"
+
+# Output configuration
+output:
+  derived_dir_name: "derived"
+  compression: "snappy"
+  write_metadata: true
