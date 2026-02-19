@@ -42,12 +42,13 @@ from keyword_pecker.data.preprocessing import (
     extract_keywords,
     load_spacy_model,
     process_document,
-    process_file,
+    process_dataset,
     resolve_keyword_spans,
     segment_sentences,
     tokenize_sentences,
     write_parquet,
 )
+from keyword_pecker.data.dataset import create_keyphrase_dataloader
 
 __all__ = [
     # Path utilities
@@ -64,9 +65,11 @@ __all__ = [
     "extract_keywords",
     "load_spacy_model",
     "process_document",
-    "process_file",
+    "process_dataset",
     "resolve_keyword_spans",
     "segment_sentences",
     "tokenize_sentences",
     "write_parquet",
+    # Dataloader
+    "create_keyphrase_dataloader",
 ]
