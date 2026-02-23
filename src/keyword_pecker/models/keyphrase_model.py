@@ -24,8 +24,8 @@ class KeyphraseModel(nn.Module):
 
     def __init__(
         self,
-        model_name: str = BaseEncoder.DEFAULT_MODEL_NAME,
-        freeze_encoder: bool = False,
+        base_encoder_name: str = BaseEncoder.DEFAULT_MODEL_NAME,
+        freeze_base_encoder: bool = False,
         d_model: int = 768,
         nhead: int = 4,
         num_layers: int = 3,
@@ -49,8 +49,8 @@ class KeyphraseModel(nn.Module):
 
         # Base encoder (pretrained SBERT)
         self.base_encoder = BaseEncoder(
-            model_name=model_name,
-            freeze=freeze_encoder,
+            model_name=base_encoder_name,
+            freeze=freeze_base_encoder,
         )
 
         # Verify d_model matches base encoder

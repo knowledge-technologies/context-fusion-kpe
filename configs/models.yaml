@@ -1,0 +1,9 @@
+keyphrase_model:
+  base_encoder_name: "sentence-transformers/all-mpnet-base-v2"
+  freeze_base_encoder: false
+  d_model: 768
+  nhead: 4
+  num_layers: 3
+  dim_feedforward: null
+  dropout: 0.1
+  max_position_embeddings: 768

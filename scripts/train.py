@@ -19,7 +19,8 @@ import torch
 import tqdm
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
-from keyword_pecker.models import BaseEncoder, KeyphraseModel
+from keyword_pecker.models import KeyphraseModel
+from keyword_pecker.utils.config import load_config
 
 
 def train(
@@ -147,11 +148,6 @@ def parse_args() -> argparse.Namespace:
         help="Dataset name (default: kp20k)",
     )
     parser.add_argument(
-        "--model-name",
-        default=BaseEncoder.DEFAULT_MODEL_NAME,
-        help="HuggingFace model identifier for the base encoder",
-    )
-    parser.add_argument(
         "--epochs",
         type=int,
         default=5,
@@ -205,8 +201,12 @@ def main() -> None:
     args = parse_args()
     device = torch.device(args.device)
 
+    # Load model configuration
+    config = load_config("configs/models.yaml")
+    model_config = config["keyphrase_model"]
+
     train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
-    model = KeyphraseModel(model_name=args.model_name).to(device)
+    model = KeyphraseModel(**model_config).to(device)
 
     train(
         model,
