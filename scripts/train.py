@@ -20,7 +20,9 @@ import tqdm
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.utils.config import load_config
+from keyword_pecker.utils import get_logger, load_config
+
+logger = get_logger("train")
 
 
 def train(
@@ -72,7 +74,7 @@ def train(
     inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
 
     for epoch in range(epochs):
-        print(f"Epoch {epoch + 1}/{epochs}")
+        logger.info(f"Epoch {epoch + 1}/{epochs}")
 
         # Re-create each epoch to re-shuffle documents (mirrors legacy .sample(frac=1.0))
         train_loader = create_keyphrase_dataloader(
@@ -119,7 +121,7 @@ def train(
                 optimizer.zero_grad()
 
                 if outer_step % log_every == 0 and last_loss is not None:
-                    print(last_loss)
+                    logger.info(f"step {outer_step} loss: {last_loss:.6f}")
 
                 outer_step += 1
                 inner_count = 0
@@ -131,7 +133,7 @@ def train(
             optimizer.zero_grad()
 
             if outer_step % log_every == 0 and last_loss is not None:
-                print(last_loss)
+                logger.info(f"step {outer_step} loss: {last_loss:.6f}")
 
             progress.update(1)
 

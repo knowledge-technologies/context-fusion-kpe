@@ -41,7 +41,9 @@ from keyword_pecker.data import (
     process_dataset,
     write_parquet,
 )
-from keyword_pecker.utils import load_config
+from keyword_pecker.utils import get_logger, load_config
+
+logger = get_logger("prepare_data")
 
 
 def extract_split_name(filepath) -> str:
@@ -96,7 +98,7 @@ def main() -> None:
     config = load_config(args.config)
 
     # Initialize models (expensive, do once)
-    print("Loading models...")
+    logger.info("Loading models...")
     nlp = load_spacy_model(
         model_name=config["segmentation"]["spacy_model"],
         exclude=config["segmentation"]["exclude"],
@@ -105,14 +107,14 @@ def main() -> None:
     stemmer = PorterStemmer()
     device = config["processing"]["device"]
 
-    print(f"  spaCy model: {config['segmentation']['spacy_model']}")
-    print(f"  Tokenizer: {config['tokenizer']['model_name']}")
-    print(f"  Device: {device}")
+    logger.info(f"  spaCy model: {config['segmentation']['spacy_model']}")
+    logger.info(f"  Tokenizer: {config['tokenizer']['model_name']}")
+    logger.info(f"  Device: {device}")
 
     # Get dataset paths
     dataset_path = get_dataset_path(args.dataset)
     if not dataset_path.exists():
-        print(f"Error: Dataset path does not exist: {dataset_path}")
+        logger.error(f"Dataset path does not exist: {dataset_path}")
         raise SystemExit(1)
 
     derived_dir = ensure_derived_dir(args.dataset)
@@ -121,7 +123,7 @@ def main() -> None:
     all_files = list_dataset_files(args.dataset, pattern="*.json")
 
     if not all_files:
-        print(f"No JSON files found in {dataset_path}")
+        logger.error(f"No JSON files found in {dataset_path}")
         raise SystemExit(1)
 
     # Filter by splits if specified
@@ -130,19 +132,18 @@ def main() -> None:
             f for f in all_files if any(split in f.stem for split in args.splits)
         ]
         if not files_to_process:
-            print(f"No files found matching splits: {args.splits}")
-            print(f"Available files: {[f.name for f in all_files]}")
+            logger.error(f"No files found matching splits: {args.splits}")
+            logger.error(f"Available files: {[f.name for f in all_files]}")
             raise SystemExit(1)
     else:
         files_to_process = all_files
 
-    print(f"\nDataset: {args.dataset}")
-    print(f"Input path: {dataset_path}")
-    print(f"Output path: {derived_dir}")
-    print(f"Files to process: {len(files_to_process)}")
+    logger.info(f"Dataset: {args.dataset}")
+    logger.info(f"Input path: {dataset_path}")
+    logger.info(f"Output path: {derived_dir}")
+    logger.info(f"Files to process: {len(files_to_process)}")
     if args.limit:
-        print(f"Row limit: {args.limit}")
-    print()
+        logger.info(f"Row limit: {args.limit}")
 
     # Process each file
     total_sentences = 0
@@ -156,11 +157,11 @@ def main() -> None:
 
         # Skip if exists and not overwriting
         if output_path.exists() and not args.overwrite:
-            print(f"  Skipping {filepath.name} (output exists, use --overwrite)")
+            logger.info(f"Skipping {filepath.name} (output exists, use --overwrite)")
             continue
 
         # Process file
-        tqdm.write(f"  Processing {filepath.name}...")
+        logger.info(f"Processing {filepath.name}...")
         processed_data = process_dataset(
             filepath=filepath,
             nlp=nlp,
@@ -172,7 +173,7 @@ def main() -> None:
         )
 
         if not processed_data:
-            tqdm.write(f"    Warning: No data extracted from {filepath.name}")
+            logger.warning(f"No data extracted from {filepath.name}")
             continue
 
         # Write to Parquet
@@ -191,7 +192,7 @@ def main() -> None:
             "num_sentences": num_rows,
         }
 
-        tqdm.write(f"    Wrote {num_rows} sentences from {num_docs} documents")
+        logger.info(f"Wrote {num_rows} sentences from {num_docs} documents")
 
     # Write metadata
     if config["output"]["write_metadata"] and processing_stats:
@@ -209,12 +210,12 @@ def main() -> None:
         metadata_path = derived_dir / "metadata.json"
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
-        print(f"\nWrote metadata to {metadata_path}")
+        logger.info(f"Wrote metadata to {metadata_path}")
 
-    print("\nProcessing complete!")
-    print(f"  Total documents: {total_documents}")
-    print(f"  Total sentences: {total_sentences}")
-    print(f"  Output directory: {derived_dir}")
+    logger.info("Processing complete!")
+    logger.info(f"Total documents: {total_documents}")
+    logger.info(f"Total sentences: {total_sentences}")
+    logger.info(f"Output directory: {derived_dir}")
 
 
 if __name__ == "__main__":
