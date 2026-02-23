@@ -15,11 +15,11 @@ Typical usage:
 
 from .base_encoder import BaseEncoder, mean_pooling
 from .keyphrase_model import KeyphraseModel
-from .refinement_head import RefinementHead
+from .refinement_encoder import RefinementEncoder
 
 __all__ = [
     "BaseEncoder",
     "KeyphraseModel",
-    "RefinementHead",
+    "RefinementEncoder",
     "mean_pooling",
 ]

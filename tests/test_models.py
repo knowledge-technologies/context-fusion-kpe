@@ -2,18 +2,18 @@
 
 import torch
 
-from keyword_pecker.models.refinement_head import RefinementHead
+from keyword_pecker.models.refinement_encoder import RefinementEncoder
 
 
 def test_refinement_head_forward_output_shape():
-    """Test that RefinementHead.forward returns correct output shape and dtype."""
+    """Test that RefinementEncoder.forward returns correct output shape and dtype."""
     # Use minimal parameters for lightweight testing
     d_model = 8
     nhead = 2
     num_layers = 1
     max_position_embeddings = 32
 
-    model = RefinementHead(
+    model = RefinementEncoder(
         d_model=d_model,
         nhead=nhead,
         num_layers=num_layers,
@@ -47,7 +47,7 @@ def test_refinement_head_forward_output_shape():
 def test_refinement_head_forward_single_document():
     """Test RefinementHead with a single document containing multiple sentences."""
     d_model = 8
-    model = RefinementHead(
+    model = RefinementEncoder(
         d_model=d_model,
         nhead=2,
         num_layers=1,
@@ -75,7 +75,7 @@ def test_refinement_head_forward_single_document():
 def test_refinement_head_forward_single_sentence():
     """Test RefinementHead with a single sentence (edge case)."""
     d_model = 8
-    model = RefinementHead(
+    model = RefinementEncoder(
         d_model=d_model,
         nhead=2,
         num_layers=1,

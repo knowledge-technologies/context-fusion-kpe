@@ -10,7 +10,7 @@ import torch.nn as nn
 from .base_encoder import mean_pooling
 
 
-class RefinementHead(nn.Module):
+class RefinementEncoder(nn.Module):
     """Transformer-based refinement head for token-level keyphrase classification.
 
     Takes word embeddings from a base encoder and refines them using:

@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 
 from .base_encoder import BaseEncoder
-from .refinement_head import RefinementHead
+from .refinement_encoder import RefinementEncoder
 
 
 class KeyphraseModel(nn.Module):
@@ -19,7 +19,7 @@ class KeyphraseModel(nn.Module):
     learning rates for fine-tuning the base encoder vs training the head.
 
     Architecture:
-        Input tokens -> BaseEncoder -> word embeddings -> RefinementHead -> token logits
+        Input tokens -> BaseEncoder -> word embeddings -> RefinementEncoder -> token logits
     """
 
     def __init__(
@@ -61,7 +61,7 @@ class KeyphraseModel(nn.Module):
             )
 
         # Refinement head
-        self.refinement_head = RefinementHead(
+        self.refinement_head = RefinementEncoder(
             d_model=d_model,
             nhead=nhead,
             num_layers=num_layers,
