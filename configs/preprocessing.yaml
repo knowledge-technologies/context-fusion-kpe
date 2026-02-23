@@ -18,6 +18,7 @@ segmentation:
     - "lemmatizer"
     - "attribute_ruler"
   batch_size: 50
+  n_process: 8
 
 # Keyword matching configuration
 matching:

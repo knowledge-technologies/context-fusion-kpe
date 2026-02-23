@@ -26,6 +26,9 @@ from nltk.stem.porter import PorterStemmer
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
+from keyword_pecker.utils import get_logger
+
+logger = get_logger("preprocessing")
 
 # ============================================================================
 # Schema Definition
@@ -72,6 +75,7 @@ def segment_sentences(
     texts: list[str],
     nlp: spacy.Language,
     batch_size: int = 50,
+    n_process: int = 1,
 ) -> list[spacy.tokens.Doc]:
     """Segment texts into sentences using spaCy.
 
@@ -85,7 +89,7 @@ def segment_sentences(
     Returns:
         List of spaCy Doc objects with sentence boundaries.
     """
-    return list(nlp.pipe(texts, batch_size=batch_size))
+    return list(nlp.pipe(texts, batch_size=batch_size, n_process=n_process))
 
 
 # ============================================================================
@@ -465,6 +469,8 @@ def process_document(
 def process_dataset(
     filepath: Path,
     nlp: spacy.Language,
+    spacy_batch_size: int,
+    spacy_n_process: int,
     tokenizer: AutoTokenizer,
     stemmer: PorterStemmer,
     limit: int | None = None,
@@ -502,12 +508,28 @@ def process_dataset(
     nlp_fulltexts: list[spacy.tokens.Doc | None]
 
     if "abstract" in columns:
-        nlp_abstracts = segment_sentences(df["abstract"].to_list(), nlp)
+        logger.info(
+            f"Segmenting abstracts (batch_size: {spacy_batch_size}, n_process: {spacy_n_process})"
+        )
+        nlp_abstracts = segment_sentences(
+            df["abstract"].to_list(),
+            nlp,
+            batch_size=spacy_batch_size,
+            n_process=spacy_n_process,
+        )
     else:
         nlp_abstracts = [None] * len(df)
 
     if "fulltext" in columns:
-        nlp_fulltexts = segment_sentences(df["fulltext"].to_list(), nlp)
+        logger.info(
+            f"Segmenting full texts (batch_size: {spacy_batch_size}, n_process: {spacy_n_process})"
+        )
+        nlp_fulltexts = segment_sentences(
+            df["fulltext"].to_list(),
+            nlp,
+            batch_size=spacy_batch_size,
+            n_process=spacy_n_process,
+        )
     else:
         nlp_fulltexts = [None] * len(df)
 

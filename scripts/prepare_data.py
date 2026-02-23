@@ -161,10 +161,12 @@ def main() -> None:
             continue
 
         # Process file
-        logger.info(f"Processing {filepath.name}...")
+        logger.info(f"Preprocessing (segmentation, tokenizing...) {filepath.name}...")
         processed_data = process_dataset(
             filepath=filepath,
             nlp=nlp,
+            spacy_batch_size=config["segmentation"]["batch_size"],
+            spacy_n_process=config["segmentation"]["n_process"],
             tokenizer=tokenizer,
             stemmer=stemmer,
             limit=args.limit,
