@@ -107,9 +107,9 @@ def main() -> None:
     stemmer = PorterStemmer()
     device = config["processing"]["device"]
 
-    logger.info(f"  spaCy model: {config['segmentation']['spacy_model']}")
-    logger.info(f"  Tokenizer: {config['tokenizer']['model_name']}")
-    logger.info(f"  Device: {device}")
+    logger.info(f"spaCy model: {config['segmentation']['spacy_model']}")
+    logger.info(f"Tokenizer: {config['tokenizer']['model_name']}")
+    logger.info(f"Device: {device}")
 
     # Get dataset paths
     dataset_path = get_dataset_path(args.dataset)
