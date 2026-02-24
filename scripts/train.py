@@ -5,24 +5,73 @@ two-level batching strategy from the original training loop:
   - Outer batch (gradient accumulation unit): outer_batch_size sentences
   - Inner batch (forward pass unit):          inner_batch_size sentences
 
+Local metrics are always written to a JSONL file under:
+  $EXPERIMENT_RUNS_FOLDER/<run_name>/metrics.jsonl
+
+When --wandb is passed (and the ``tracking`` extra is installed), metrics are
+also streamed to Weights & Biases and the run name is taken from W&B.
+
 Usage:
     python scripts/train.py
     python scripts/train.py --epochs 10 --device cuda --dataset kp20k
     python scripts/train.py --base-lr 2e-5 --head-lr 5e-5 --pos-weight 5.0
+    python scripts/train.py --wandb
 """
 
 import argparse
+import json
 import math
+import os
+import types
+from pathlib import Path
 
 import polars as pl
 import torch
 import tqdm
+from dotenv import load_dotenv
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.utils import get_logger, load_config
+from keyword_pecker.utils import get_logger, load_config, setup_wandb
+
+load_dotenv()
 
 logger = get_logger("train")
+
+
+# ---------------------------------------------------------------------------
+# Local run directory helpers
+# ---------------------------------------------------------------------------
+
+
+def get_runs_root() -> Path:
+    """Return the root directory for all experiment runs.
+
+    Reads ``EXPERIMENT_RUNS_FOLDER`` from the environment (set in ``.env``).
+    Falls back to ``$DATASET_FOLDER/runs`` if not defined.
+    """
+    runs_env = os.environ.get("EXPERIMENT_RUNS_FOLDER")
+    if runs_env:
+        return Path(runs_env)
+
+    dataset_env = os.environ.get("DATASET_FOLDER")
+    if dataset_env:
+        return Path(dataset_env) / "runs"
+
+    # Last resort: write next to the project root
+    return Path(__file__).parent.parent / "runs"
+
+
+def init_run_dir(run_name: str) -> Path:
+    """Create and return the directory for a single run."""
+    run_dir = get_runs_root() / run_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+# ---------------------------------------------------------------------------
+# Training loop
+# ---------------------------------------------------------------------------
 
 
 def train(
@@ -37,6 +86,8 @@ def train(
     pos_weight: float,
     log_every: int,
     device: torch.device,
+    metrics_file: Path,
+    wandb: types.ModuleType | None,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -59,6 +110,8 @@ def train(
         pos_weight: Positive class weight for BCEWithLogitsLoss.
         log_every: Print loss every this many optimizer steps.
         device: Device to run on.
+        metrics_file: Path to the JSONL file where metrics are appended.
+        wandb: The wandb module if W&B tracking is active, or ``None``.
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -73,71 +126,131 @@ def train(
 
     inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
 
-    for epoch in range(epochs):
-        logger.info(f"Epoch {epoch + 1}/{epochs}")
+    global_step = 0
 
-        # Re-create each epoch to re-shuffle documents (mirrors legacy .sample(frac=1.0))
-        train_loader = create_keyphrase_dataloader(
-            df=train_df,
-            outer_batch_size=outer_batch_size,
-            inner_batch_size=inner_batch_size,
-            shuffle=True,
-            drop_last=False,
-            num_workers=0,
-        )
+    with metrics_file.open("a") as mf:
+        for epoch in range(epochs):
+            logger.info(f"Epoch {epoch + 1}/{epochs}")
+            if wandb:
+                wandb.log({"epoch": epoch + 1}, step=global_step)
 
-        model.train()
-        optimizer.zero_grad()
+            # Re-create each epoch to re-shuffle documents
+            train_loader = create_keyphrase_dataloader(
+                df=train_df,
+                outer_batch_size=outer_batch_size,
+                inner_batch_size=inner_batch_size,
+                shuffle=True,
+                drop_last=False,
+                num_workers=0,
+            )
 
-        outer_step = 0
-        inner_count = 0
-        last_loss: float | None = None
+            model.train()
+            optimizer.zero_grad()
 
-        total_outer = math.ceil(len(train_loader) / inner_per_outer)
-        progress = tqdm.trange(total_outer, desc="steps")
+            outer_step = 0
+            inner_count = 0
+            last_loss: float | None = None
+            epoch_loss_sum = 0.0
+            epoch_loss_count = 0
 
-        for batch in train_loader:
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            target = batch["target"].to(device)
-            sentence_counts = batch["sentence_counts"]
+            total_outer = math.ceil(len(train_loader) / inner_per_outer)
+            progress = tqdm.trange(total_outer, desc="steps")
 
-            logits = model(input_ids, attention_mask, sentence_counts)
+            for batch in train_loader:
+                input_ids = batch["input_ids"].to(device)
+                attention_mask = batch["attention_mask"].to(device)
+                target = batch["target"].to(device)
+                sentence_counts = batch["sentence_counts"]
 
-            # Masked mean loss: average only over non-padding token positions
-            loss = loss_fn(logits, target) * attention_mask
-            loss = loss.sum() / attention_mask.sum()
-            loss.backward()
+                logits = model(input_ids, attention_mask, sentence_counts)
 
-            last_loss = loss.detach().cpu().item()
+                # Masked mean loss: average only over non-padding token positions
+                loss = loss_fn(logits, target) * attention_mask
+                loss = loss.sum() / attention_mask.sum()
+                loss.backward()
 
-            # Eagerly free activations (mirrors legacy explicit None assignments)
-            del logits, loss, input_ids, attention_mask, target
+                last_loss = loss.detach().cpu().item()
 
-            inner_count += 1
+                # Eagerly free activations
+                del logits, loss, input_ids, attention_mask, target
 
-            if inner_count == inner_per_outer:
+                inner_count += 1
+
+                if inner_count == inner_per_outer:
+                    optimizer.step()
+                    optimizer.zero_grad()
+
+                    if last_loss is not None:
+                        epoch_loss_sum += last_loss
+                        epoch_loss_count += 1
+
+                        if outer_step % log_every == 0:
+                            logger.info(f"step {global_step} loss: {last_loss:.6f}")
+
+                            record = {
+                                "epoch": epoch + 1,
+                                "outer_step": outer_step,
+                                "global_step": global_step,
+                                "train_loss": last_loss,
+                            }
+                            mf.write(json.dumps(record) + "\n")
+                            mf.flush()
+
+                            if wandb:
+                                wandb.log({"train/loss": last_loss}, step=global_step)
+
+                    outer_step += 1
+                    global_step += 1
+                    inner_count = 0
+                    progress.update(1)
+
+            # Step on any remaining accumulated gradients (last incomplete outer chunk)
+            if inner_count > 0:
                 optimizer.step()
                 optimizer.zero_grad()
 
-                if outer_step % log_every == 0 and last_loss is not None:
-                    logger.info(f"step {outer_step} loss: {last_loss:.6f}")
+                if last_loss is not None:
+                    epoch_loss_sum += last_loss
+                    epoch_loss_count += 1
 
-                outer_step += 1
-                inner_count = 0
+                    if outer_step % log_every == 0:
+                        logger.info(f"step {global_step} loss: {last_loss:.6f}")
+
+                        record = {
+                            "epoch": epoch + 1,
+                            "outer_step": outer_step,
+                            "global_step": global_step,
+                            "train_loss": last_loss,
+                        }
+                        mf.write(json.dumps(record) + "\n")
+                        mf.flush()
+
+                        if wandb:
+                            wandb.log({"train/loss": last_loss}, step=global_step)
+
+                global_step += 1
                 progress.update(1)
 
-        # Step on any remaining accumulated gradients (last incomplete outer chunk)
-        if inner_count > 0:
-            optimizer.step()
-            optimizer.zero_grad()
+            progress.close()
 
-            if outer_step % log_every == 0 and last_loss is not None:
-                logger.info(f"step {outer_step} loss: {last_loss:.6f}")
+            # Epoch-level summary
+            if epoch_loss_count > 0:
+                mean_loss = epoch_loss_sum / epoch_loss_count
+                logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
 
-            progress.update(1)
+                mf.write(
+                    json.dumps({"epoch": epoch + 1, "epoch_mean_loss": mean_loss})
+                    + "\n"
+                )
+                mf.flush()
 
-        progress.close()
+                if wandb:
+                    wandb.log({"train/epoch_mean_loss": mean_loss}, step=global_step)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 def parse_args() -> argparse.Namespace:
@@ -196,32 +309,85 @@ def parse_args() -> argparse.Namespace:
         default="cpu",
         help="Device to train on: cpu, cuda, mps (default: cpu)",
     )
+    parser.add_argument(
+        "--wandb",
+        action="store_true",
+        default=False,
+        help="Enable Weights & Biases experiment tracking (requires the 'tracking' extra).",
+    )
     return parser.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 
 
 def main() -> None:
     args = parse_args()
     device = torch.device(args.device)
 
-    # Load model configuration
-    config = load_config("configs/models.yaml")
-    model_config = config["keyphrase_model"]
+    # Load model and training configuration
+    model_config = load_config("configs/models.yaml")["keyphrase_model"]
+    training_config = load_config("configs/training.yaml")
+    wandb_config = training_config.get("wandb", {})
 
+    # Flatten all hyperparams into one dict for W&B config and config.json
+    hyperparams: dict = {
+        "dataset": args.dataset,
+        "epochs": args.epochs,
+        "outer_batch_size": args.outer_batch_size,
+        "inner_batch_size": args.inner_batch_size,
+        "base_lr": args.base_lr,
+        "head_lr": args.head_lr,
+        "pos_weight": args.pos_weight,
+        "log_every": args.log_every,
+        "device": args.device,
+        **model_config,
+    }
+
+    # Single W&B setup call. Returns (wandb_module, run_name) — wandb_module is
+    # None if W&B is disabled or not installed. run_name is used for the local
+    # run directory in both cases.
+    wandb, run_name = setup_wandb(
+        enabled=args.wandb,
+        config=hyperparams,
+        project=wandb_config.get("project"),
+        entity=wandb_config.get("entity"),
+        tags=wandb_config.get("tags") or [],
+        notes=wandb_config.get("notes", ""),
+    )
+
+    # Set up local run directory and files
+    run_dir = init_run_dir(run_name)
+    metrics_file = run_dir / "metrics.json"
+    config_file = run_dir / "config.json"
+
+    config_file.write_text(json.dumps(hyperparams, indent=2))
+    logger.info(f"Run directory: {run_dir}")
+
+    # Load data and model
     train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
     model = KeyphraseModel(**model_config).to(device)
 
-    train(
-        model,
-        train_df,
-        epochs=args.epochs,
-        outer_batch_size=args.outer_batch_size,
-        inner_batch_size=args.inner_batch_size,
-        base_lr=args.base_lr,
-        head_lr=args.head_lr,
-        pos_weight=args.pos_weight,
-        log_every=args.log_every,
-        device=device,
-    )
+    try:
+        train(
+            model,
+            train_df,
+            epochs=args.epochs,
+            outer_batch_size=args.outer_batch_size,
+            inner_batch_size=args.inner_batch_size,
+            base_lr=args.base_lr,
+            head_lr=args.head_lr,
+            pos_weight=args.pos_weight,
+            log_every=args.log_every,
+            device=device,
+            metrics_file=metrics_file,
+            wandb=wandb,
+        )
+    finally:
+        if wandb:
+            wandb.finish()
 
 
 if __name__ == "__main__":

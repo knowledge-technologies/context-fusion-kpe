@@ -1,4 +1,5 @@
 from keyword_pecker.utils.config import load_config
 from keyword_pecker.utils.logging import get_logger
+from keyword_pecker.utils.wandb import setup_wandb
 
-__all__ = ["get_logger", "load_config"]
+__all__ = ["get_logger", "load_config", "setup_wandb"]
