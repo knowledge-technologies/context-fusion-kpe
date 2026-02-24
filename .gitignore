@@ -12,3 +12,6 @@ tmp
 
 # Env files
 .env
+
+# wandb logs
+/wandb
