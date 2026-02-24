@@ -86,7 +86,7 @@ def train(
     pos_weight: float,
     log_every: int,
     device: torch.device,
-    metrics_file: Path,
+    metrics_filename: Path,
     wandb: types.ModuleType | None,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
@@ -128,84 +128,56 @@ def train(
 
     global_step = 0
 
-    with metrics_file.open("a") as mf:
-        for epoch in range(epochs):
-            logger.info(f"Epoch {epoch + 1}/{epochs}")
-            if wandb:
-                wandb.log({"epoch": epoch + 1}, step=global_step)
+    metrics_file = metrics_filename.open("a")
 
-            # Re-create each epoch to re-shuffle documents
-            train_loader = create_keyphrase_dataloader(
-                df=train_df,
-                outer_batch_size=outer_batch_size,
-                inner_batch_size=inner_batch_size,
-                shuffle=True,
-                drop_last=False,
-                num_workers=0,
-            )
+    for epoch in range(epochs):
+        logger.info(f"Epoch {epoch + 1}/{epochs}")
+        if wandb:
+            wandb.log({"epoch": epoch + 1}, step=global_step)
 
-            model.train()
-            optimizer.zero_grad()
+        # Re-create each epoch to re-shuffle documents
+        train_loader = create_keyphrase_dataloader(
+            df=train_df,
+            outer_batch_size=outer_batch_size,
+            inner_batch_size=inner_batch_size,
+            shuffle=True,
+            drop_last=False,
+            num_workers=0,
+        )
 
-            outer_step = 0
-            inner_count = 0
-            last_loss: float | None = None
-            epoch_loss_sum = 0.0
-            epoch_loss_count = 0
+        model.train()
+        optimizer.zero_grad()
 
-            total_outer = math.ceil(len(train_loader) / inner_per_outer)
-            progress = tqdm.trange(total_outer, desc="steps")
+        outer_step = 0
+        inner_count = 0
+        last_loss: float | None = None
+        epoch_loss_sum = 0.0
+        epoch_loss_count = 0
 
-            for batch in train_loader:
-                input_ids = batch["input_ids"].to(device)
-                attention_mask = batch["attention_mask"].to(device)
-                target = batch["target"].to(device)
-                sentence_counts = batch["sentence_counts"]
+        total_outer = math.ceil(len(train_loader) / inner_per_outer)
+        progress = tqdm.trange(total_outer, desc="steps")
 
-                logits = model(input_ids, attention_mask, sentence_counts)
+        for batch in train_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            target = batch["target"].to(device)
+            sentence_counts = batch["sentence_counts"]
 
-                # Masked mean loss: average only over non-padding token positions
-                loss = loss_fn(logits, target) * attention_mask
-                loss = loss.sum() / attention_mask.sum()
-                loss.backward()
+            logits = model(input_ids, attention_mask, sentence_counts)
 
-                last_loss = loss.detach().cpu().item()
+            # Masked mean loss: average only over non-padding token positions
+            loss = loss_fn(logits, target) * attention_mask
+            loss = loss.sum() / attention_mask.sum()
+            loss.backward()
 
-                # Eagerly free activations
-                del logits, loss, input_ids, attention_mask, target
+            last_loss = loss.detach().cpu().item()
 
-                inner_count += 1
+            # Eagerly free activations
+            del logits, loss, input_ids, attention_mask, target
 
-                if inner_count == inner_per_outer:
-                    optimizer.step()
-                    optimizer.zero_grad()
+            inner_count += 1
 
-                    if last_loss is not None:
-                        epoch_loss_sum += last_loss
-                        epoch_loss_count += 1
-
-                        if outer_step % log_every == 0:
-                            logger.info(f"step {global_step} loss: {last_loss:.6f}")
-
-                            record = {
-                                "epoch": epoch + 1,
-                                "outer_step": outer_step,
-                                "global_step": global_step,
-                                "train_loss": last_loss,
-                            }
-                            mf.write(json.dumps(record) + "\n")
-                            mf.flush()
-
-                            if wandb:
-                                wandb.log({"train/loss": last_loss}, step=global_step)
-
-                    outer_step += 1
-                    global_step += 1
-                    inner_count = 0
-                    progress.update(1)
-
-            # Step on any remaining accumulated gradients (last incomplete outer chunk)
-            if inner_count > 0:
+            if inner_count == inner_per_outer:
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -222,11 +194,40 @@ def train(
                             "global_step": global_step,
                             "train_loss": last_loss,
                         }
-                        mf.write(json.dumps(record) + "\n")
-                        mf.flush()
+                        metrics_file.write(json.dumps(record) + "\n")
+                        metrics_file.flush()
 
                         if wandb:
                             wandb.log({"train/loss": last_loss}, step=global_step)
+
+                outer_step += 1
+                global_step += 1
+                inner_count = 0
+                progress.update(1)
+
+        # Step on any remaining accumulated gradients (last incomplete outer chunk)
+        if inner_count > 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if last_loss is not None:
+                epoch_loss_sum += last_loss
+                epoch_loss_count += 1
+
+                if outer_step % log_every == 0:
+                    logger.info(f"step {global_step} loss: {last_loss:.6f}")
+
+                    record = {
+                        "epoch": epoch + 1,
+                        "outer_step": outer_step,
+                        "global_step": global_step,
+                        "train_loss": last_loss,
+                    }
+                    metrics_file.write(json.dumps(record) + "\n")
+                    metrics_file.flush()
+
+                    if wandb:
+                        wandb.log({"train/loss": last_loss}, step=global_step)
 
                 global_step += 1
                 progress.update(1)
@@ -238,14 +239,16 @@ def train(
                 mean_loss = epoch_loss_sum / epoch_loss_count
                 logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
 
-                mf.write(
+                metrics_file.write(
                     json.dumps({"epoch": epoch + 1, "epoch_mean_loss": mean_loss})
                     + "\n"
                 )
-                mf.flush()
+                metrics_file.flush()
 
                 if wandb:
                     wandb.log({"train/epoch_mean_loss": mean_loss}, step=global_step)
+
+    metrics_file.close()
 
 
 # ---------------------------------------------------------------------------
@@ -360,10 +363,10 @@ def main() -> None:
 
     # Set up local run directory and files
     run_dir = init_run_dir(run_name)
-    metrics_file = run_dir / "metrics.json"
-    config_file = run_dir / "config.json"
+    metrics_filename = run_dir / "metrics.json"
+    config_filename = run_dir / "config.json"
 
-    config_file.write_text(json.dumps(hyperparams, indent=2))
+    config_filename.write_text(json.dumps(hyperparams, indent=2))
     logger.info(f"Run directory: {run_dir}")
 
     # Load data and model
@@ -382,7 +385,7 @@ def main() -> None:
             pos_weight=args.pos_weight,
             log_every=args.log_every,
             device=device,
-            metrics_file=metrics_file,
+            metrics_filename=metrics_filename,
             wandb=wandb,
         )
     finally:
