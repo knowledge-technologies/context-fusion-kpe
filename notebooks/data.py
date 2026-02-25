@@ -18,20 +18,34 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     from pathlib import Path
+    from pprint import pprint
     import polars as pl
-    from keyword_pecker.data import process_dataset, load_spacy_model, SENTENCE_SCHEMA
-    from keyword_pecker.utils import load_config
     from transformers import AutoTokenizer
     from nltk.stem.porter import PorterStemmer
 
+    import marimo as mo
+
+    from keyword_pecker.data import (
+        process_dataset,
+        load_spacy_model,
+        create_keyphrase_dataloader,
+        SENTENCE_SCHEMA,
+    )
+    from keyword_pecker.models import KeyphraseModel
+    from keyword_pecker.utils import load_config
+
     return (
         AutoTokenizer,
+        KeyphraseModel,
         Path,
         PorterStemmer,
         SENTENCE_SCHEMA,
+        create_keyphrase_dataloader,
         load_config,
         load_spacy_model,
+        mo,
         pl,
+        pprint,
         process_dataset,
     )
 
@@ -87,8 +101,94 @@ def _(example_data):
     return
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Example input sequence
+    """)
+    return
+
+
 @app.cell
-def _():
+def _(example_data, tokenizer):
+    SENTENCE_ID = 2
+    print(f"Input text: {example_data.select('sent_txt')[SENTENCE_ID].item()}")
+    print(
+        f"Tokens: {tokenizer.decode(example_data.select('token_ids')[SENTENCE_ID].item())}"
+    )
+    print(
+        f"Token ids: {example_data.select('token_ids')[SENTENCE_ID].item().to_list()}"
+    )
+    return
+
+
+@app.cell
+def _(create_keyphrase_dataloader, example_data):
+    dataloader = create_keyphrase_dataloader(
+        df=example_data,
+        outer_batch_size=6,
+        inner_batch_size=4,
+        shuffle=True,
+        drop_last=False,
+        num_workers=0,
+    )
+    return (dataloader,)
+
+
+@app.cell
+def _(dataloader):
+    print(f"Number batches: {len(dataloader)}")
+    return
+
+
+@app.cell
+def _(dataloader):
+    data_iter = iter(dataloader)
+    sample_batch = next(data_iter)
+    return (sample_batch,)
+
+
+@app.cell
+def _(pprint, sample_batch):
+    pprint(sample_batch)
+    return
+
+
+@app.cell
+def _(KeyphraseModel, load_config):
+    model_cfg = load_config("./configs/models.yaml")["keyphrase_model"]
+    model = KeyphraseModel(**model_cfg)
+    return (model,)
+
+
+@app.cell
+def _(model):
+    model
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Prepare inputs
+    """)
+    return
+
+
+@app.cell
+def _(pprint, sample_batch):
+    input_ids = sample_batch["input_ids"]
+    attn_mask = sample_batch["attention_mask"]
+
+    sentence_counts = sample_batch["sentence_counts"]
+    pprint(f"Input shape = {input_ids.shape}")
+    pprint(f"Attn mask shape = {attn_mask.shape}")
+    return attn_mask, input_ids, sentence_counts
+
+
+@app.cell
+def _(attn_mask, input_ids, model, sentence_counts):
+    _ = model(input_ids, attn_mask, sentence_counts)
     return
 
 
