@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
+from keyword_pecker.trainer import validate
 from keyword_pecker.utils import get_logger, load_config, setup_wandb
 
 load_dotenv()
@@ -88,6 +89,8 @@ def train(
     device: torch.device,
     metrics_filename: Path,
     wandb: types.ModuleType | None,
+    val_df: pl.DataFrame | None = None,
+    val_batch_size: int = 100,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -110,8 +113,10 @@ def train(
         pos_weight: Positive class weight for BCEWithLogitsLoss.
         log_every: Print loss every this many optimizer steps.
         device: Device to run on.
-        metrics_file: Path to the JSONL file where metrics are appended.
+        metrics_filename: Path to the JSONL file where metrics are appended.
         wandb: The wandb module if W&B tracking is active, or ``None``.
+        val_df: Optional Polars DataFrame for validation (same schema as train_df).
+        val_batch_size: Batch size for validation forward passes (default: 100).
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -232,21 +237,39 @@ def train(
                 global_step += 1
                 progress.update(1)
 
-            progress.close()
+        progress.close()
 
-            # Epoch-level summary
-            if epoch_loss_count > 0:
-                mean_loss = epoch_loss_sum / epoch_loss_count
-                logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
+        # Epoch-level summary
+        if epoch_loss_count > 0:
+            mean_loss = epoch_loss_sum / epoch_loss_count
+            logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
 
-                metrics_file.write(
-                    json.dumps({"epoch": epoch + 1, "epoch_mean_loss": mean_loss})
-                    + "\n"
-                )
-                metrics_file.flush()
+            metrics_file.write(
+                json.dumps({"epoch": epoch + 1, "epoch_mean_loss": mean_loss}) + "\n"
+            )
+            metrics_file.flush()
 
-                if wandb:
-                    wandb.log({"train/epoch_mean_loss": mean_loss}, step=global_step)
+            if wandb:
+                wandb.log({"train/epoch_mean_loss": mean_loss}, step=global_step)
+
+        # Run validation at end of each epoch
+        if val_df is not None:
+            val_metrics = validate(
+                model,
+                val_df,
+                batch_size=val_batch_size,
+                pos_weight=pos_weight,
+                device=device,
+                metrics_filename=metrics_filename,
+                wandb=wandb,
+                global_step=global_step,
+                epoch=epoch + 1,
+            )
+            logger.info(
+                f"Epoch {epoch + 1} val loss: {val_metrics['val_loss']:.6f}, "
+                f"P/R/F1: {val_metrics['precision']:.4f}/"
+                f"{val_metrics['recall']:.4f}/{val_metrics['f1']:.4f}"
+            )
 
     metrics_file.close()
 
@@ -313,6 +336,12 @@ def parse_args() -> argparse.Namespace:
         help="Device to train on: cpu, cuda, mps (default: cpu)",
     )
     parser.add_argument(
+        "--val-batch-size",
+        type=int,
+        default=100,
+        help="Batch size for validation (default: 100)",
+    )
+    parser.add_argument(
         "--wandb",
         action="store_true",
         default=False,
@@ -346,6 +375,7 @@ def main() -> None:
         "pos_weight": args.pos_weight,
         "log_every": args.log_every,
         "device": args.device,
+        "val_batch_size": args.val_batch_size,
         **model_config,
     }
 
@@ -371,6 +401,7 @@ def main() -> None:
 
     # Load data and model
     train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
+    val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
     model = KeyphraseModel(**model_config).to(device)
 
     try:
@@ -387,6 +418,8 @@ def main() -> None:
             device=device,
             metrics_filename=metrics_filename,
             wandb=wandb,
+            val_df=val_df,
+            val_batch_size=args.val_batch_size,
         )
     finally:
         if wandb:
