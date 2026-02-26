@@ -42,3 +42,12 @@ build-backend = "uv_build"
 dev = [
     "marimo>=0.20.2",
 ]
+
+[tool.poe.executor]
+type = "uv"
+
+[tool.poe.tasks.download_kp20k]
+cmd = "python -m scripts/download_datasets kpt20k"
+
+[tool.poe.tasks.download_kptimes]
+cmd = "python ./scripts/download_datasets.py kptimes"
