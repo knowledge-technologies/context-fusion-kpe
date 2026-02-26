@@ -51,3 +51,13 @@ cmd = "python -m scripts/download_datasets kpt20k"
 
 [tool.poe.tasks.download_kptimes]
 cmd = "python ./scripts/download_datasets.py kptimes"
+
+[tool.poe.tasks.preprocess_kp20k]
+cmd = "python ./scripts/prepare_data.py kp20k --limit 5000"
+
+[tool.poe.tasks.preprocess_kptimes_test]
+cmd = "python ./scripts/prepare_data.py kptimes"
+
+# ===== TRAINING ===== #
+[tool.poe.tasks.train_kp20k]
+cmd = "python ./scripts/train.py --dataset kp20k --wandb"
