@@ -16,7 +16,9 @@ from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
-from keyword_pecker.utils import load_config
+from keyword_pecker.utils import load_config, get_logger
+
+logger = get_logger(name="download_datasets")
 
 
 def get_dataset_folder() -> Path:
@@ -41,15 +43,15 @@ def download_file(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     if dest.exists():
-        print(f"  Skipping {dest.name} (already exists)")
+        logger.info(f"Skipping {dest.name} (already exists)")
         return
 
-    print(f"  Downloading {dest.name}...")
+    logger.info(f"Downloading {dest.name}...")
     try:
         urllib.request.urlretrieve(url, dest)
-        print(f"  Saved to {dest}")
+        logger.info(f"Saved to {dest}")
     except Exception as e:
-        print(f"  Error downloading {url}: {e}")
+        logger.error(f"Error downloading {url}: {e}")
         raise
 
 
@@ -67,14 +69,14 @@ def download_dataset(
         dataset_folder: Base folder for datasets.
         splits: Optional list of specific splits to download. If None, downloads all.
     """
-    print(f"\nDataset: {name}")
-    print(f"  Description: {config.get('description', 'No description')}")
+    logger.info(f"\nDataset: {name}")
+    logger.info(f"  Description: {config.get('description', 'No description')}")
 
     dataset_dir = dataset_folder / name
     available_splits = config.get("splits", {})
 
     if not available_splits:
-        print(f"  Warning: No splits defined for {name}")
+        logger.warning(f"Warning: No splits defined for {name}")
         return
 
     for split_name, url in available_splits.items():
@@ -87,14 +89,13 @@ def download_dataset(
 
 def list_datasets(datasets_config: dict) -> None:
     """Print available datasets and their splits."""
-    print("Available datasets:\n")
+    logger.info("Available datasets:\n")
     for name, config in datasets_config.items():
-        print(f"  {name}:")
-        print(f"    Description: {config.get('description', 'No description')}")
+        logger.info(f"{name}:")
+        logger.info(f"Description: {config.get('description', 'No description')}")
         splits = config.get("splits", {})
         if splits:
-            print(f"    Splits: {', '.join(splits.keys())}")
-        print()
+            logger.info(f"    Splits: {', '.join(splits.keys())}")
 
 
 def main() -> None:
@@ -126,7 +127,7 @@ def main() -> None:
     datasets_config = config.get("datasets", {})
 
     if not datasets_config:
-        print("No datasets found in configuration.")
+        logger.info("No datasets found in configuration.")
         raise SystemExit(1)
 
     # List mode
@@ -136,7 +137,7 @@ def main() -> None:
 
     # Download mode
     dataset_folder = get_dataset_folder()
-    print(f"Dataset folder: {dataset_folder}")
+    logger.info(f"Dataset folder: {dataset_folder}")
 
     # Determine which datasets to download
     if args.datasets:
@@ -144,8 +145,8 @@ def main() -> None:
         # Validate dataset names
         unknown = set(datasets_to_download) - set(datasets_config.keys())
         if unknown:
-            print(f"Error: Unknown datasets: {unknown}")
-            print(f"Available: {list(datasets_config.keys())}")
+            logger.error(f"Unknown datasets: {unknown}")
+            logger.info(f"Available: {list(datasets_config.keys())}")
             raise SystemExit(1)
     else:
         datasets_to_download = list(datasets_config.keys())
