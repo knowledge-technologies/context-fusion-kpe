@@ -6,3 +6,11 @@ datasets:
       train: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_train.json?ref_type=heads&inline=false"
       valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_valid.json?ref_type=heads&inline=false"
       test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kp20k/kp20k_test.json?ref_type=heads&inline=false"
+
+  kptimes:
+    description: "Large-scale dataset of news texts paired with editor-curated key phrases."
+    reference: https://aclanthology.org/W19-8617
+    splits:
+      train: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_train.json?ref_type=heads&inline=false"
+      valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_valid.json?ref_type=heads&inline=false"
+      test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_test.json?ref_type=heads&inline=false"
