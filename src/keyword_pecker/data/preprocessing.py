@@ -90,14 +90,7 @@ def segment_sentences(
     Returns:
         List of spaCy Doc objects with sentence boundaries.
     """
-    return list(
-        tqdm(
-            nlp.pipe(texts, batch_size=batch_size, n_process=n_process),
-            total=len(texts),
-            desc="segmenting",
-            leave=False,
-        )
-    )
+    return list(nlp.pipe(texts, batch_size=batch_size, n_process=n_process))
 
 
 # ============================================================================
