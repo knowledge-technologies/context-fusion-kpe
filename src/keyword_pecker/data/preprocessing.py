@@ -85,11 +85,19 @@ def segment_sentences(
         texts: List of texts to segment.
         nlp: Loaded spaCy model.
         batch_size: Batch size for processing.
+        n_process: Number of processes for parallel processing.
 
     Returns:
         List of spaCy Doc objects with sentence boundaries.
     """
-    return list(nlp.pipe(texts, batch_size=batch_size, n_process=n_process))
+    return list(
+        tqdm(
+            nlp.pipe(texts, batch_size=batch_size, n_process=n_process),
+            total=len(texts),
+            desc="segmenting",
+            leave=False,
+        )
+    )
 
 
 # ============================================================================
@@ -100,10 +108,10 @@ def segment_sentences(
 def build_keyword_regex(
     keywords: list[str],
     stemmer: PorterStemmer,
-) -> tuple[str, list[str]]:
+) -> tuple[regex.Pattern, list[str]]:
     """Build stemmed regex pattern from keywords.
 
-    Creates a regex that matches stemmed versions of keywords,
+    Creates a compiled regex that matches stemmed versions of keywords,
     sorted by length (longest first) to prioritize longer matches.
 
     Args:
@@ -111,12 +119,12 @@ def build_keyword_regex(
         stemmer: Porter stemmer instance.
 
     Returns:
-        Tuple of (regex_pattern, stemmed_keywords).
+        Tuple of (compiled_regex_pattern, stemmed_keywords).
 
     Example:
         >>> stemmer = PorterStemmer()
         >>> pattern, stemmed = build_keyword_regex(["machine learning"], stemmer)
-        >>> pattern
+        >>> pattern.pattern
         'machin\\\\w*\\\\s+learn\\\\w*'
     """
     regex_parts = []
@@ -134,14 +142,14 @@ def build_keyword_regex(
 
     # Sort by length (longest first) to prioritize longer matches
     combined_pattern = "|".join(sorted(regex_parts, key=len, reverse=True))
-    return combined_pattern, stemmed_kws
+    return regex.compile(combined_pattern, flags=regex.IGNORECASE), stemmed_kws
 
 
 def resolve_keyword_spans(
     sentence: str,
     offsets: np.ndarray,
     num_total_tokens: int,
-    regex_pattern: str,
+    regex_pattern: regex.Pattern,
     stemmed_kws: list[str],
 ) -> tuple[list[str], list[tuple[int, int]]]:
     """Resolve keyword spans in sentence to token ranges.
@@ -156,7 +164,7 @@ def resolve_keyword_spans(
         sentence: Lowercased sentence text.
         offsets: Token offset mapping from tokenizer (shape: [seq_len, 2]).
         num_total_tokens: Number of tokens (excluding padding).
-        regex_pattern: Regex pattern for matching keywords.
+        regex_pattern: Compiled regex pattern for matching keywords.
         stemmed_kws: List of stemmed keywords (for reference).
 
     Returns:
@@ -185,9 +193,7 @@ def resolve_keyword_spans(
 
     covered_spans = np.zeros(len(sentence) + 1)
 
-    for m in regex.finditer(
-        regex_pattern, sentence, overlapped=True, flags=regex.IGNORECASE
-    ):
+    for m in regex_pattern.finditer(sentence, overlapped=True):
         w_string = m.group(0)
         w_start, w_end = m.start(), m.start() + len(w_string)
         assert w_end == m.end()
