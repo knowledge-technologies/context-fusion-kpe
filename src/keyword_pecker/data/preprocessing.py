@@ -329,10 +329,10 @@ def write_parquet(
     if not data_rows:
         return 0
 
-    df = pl.DataFrame(data_rows, schema=schema or SENTENCE_SCHEMA)
+    lf = pl.LazyFrame(data_rows, schema=schema or SENTENCE_SCHEMA)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df.write_parquet(output_path, compression="snappy")
-    return len(df)
+    lf.sink_parquet(output_path, compression="snappy")
+    return len(lf)
 
 
 # ============================================================================
