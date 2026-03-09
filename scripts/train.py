@@ -284,9 +284,15 @@ def parse_args() -> argparse.Namespace:
         description="Train the keyphrase extraction model."
     )
     parser.add_argument(
-        "--dataset",
-        default="kp20k",
+        "dataset",
+        required=True,
         help="Dataset name (default: kp20k)",
+    )
+    parser.add_argument(
+        "--from_config",
+        action="store_true",
+        default=False,
+        help="Whether to load training params from `configs/training.yaml`. If false, CLI arguments are used.",
     )
     parser.add_argument(
         "--epochs",
@@ -357,27 +363,36 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    device = torch.device(args.device)
 
     # Load model and training configuration
     model_config = load_config("configs/models.yaml")["keyphrase_model"]
-    training_config = load_config("configs/training.yaml")
-    wandb_config = training_config.get("wandb", {})
 
-    # Flatten all hyperparams into one dict for W&B config and config.json
-    hyperparams: dict = {
-        "dataset": args.dataset,
-        "epochs": args.epochs,
-        "outer_batch_size": args.outer_batch_size,
-        "inner_batch_size": args.inner_batch_size,
-        "base_lr": args.base_lr,
-        "head_lr": args.head_lr,
-        "pos_weight": args.pos_weight,
-        "log_every": args.log_every,
-        "device": args.device,
-        "val_batch_size": args.val_batch_size,
-        **model_config,
-    }
+    train_cfg_tmp = load_config("configs/training.yaml")
+    wandb_config = train_cfg_tmp.get("wandb", {})
+
+    # Flatten all hyperparams into one dict for W&B config and training_onfig.json
+    if args.from_config:
+        training_config = train_cfg_tmp.get("training", {})
+        hyperparams: dict = {
+            **training_config,
+            **model_config,
+        }
+    else:
+        hyperparams: dict = {
+            "dataset": args.dataset,
+            "epochs": args.epochs,
+            "outer_batch_size": args.outer_batch_size,
+            "inner_batch_size": args.inner_batch_size,
+            "base_lr": args.base_lr,
+            "head_lr": args.head_lr,
+            "pos_weight": args.pos_weight,
+            "log_every": args.log_every,
+            "device": args.device,
+            "val_batch_size": args.val_batch_size,
+            **model_config,
+        }
+
+    device = torch.device(hyperparams["device"])
 
     # Single W&B setup call. Returns (wandb_module, run_name) — wandb_module is
     # None if W&B is disabled or not installed. run_name is used for the local
@@ -400,26 +415,26 @@ def main() -> None:
     logger.info(f"Run directory: {run_dir}")
 
     # Load data and model
-    train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
-    val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
+    train_df = pl.read_parquet(get_derived_path(hyperparams["dataset"], "train"))
+    val_df = pl.read_parquet(get_derived_path(hyperparams["dataset"], "valid"))
     model = KeyphraseModel(**model_config).to(device)
 
     try:
         train(
             model,
             train_df,
-            epochs=args.epochs,
-            outer_batch_size=args.outer_batch_size,
-            inner_batch_size=args.inner_batch_size,
-            base_lr=args.base_lr,
-            head_lr=args.head_lr,
-            pos_weight=args.pos_weight,
-            log_every=args.log_every,
+            epochs=hyperparams["epochs"],
+            outer_batch_size=hyperparams["outer_batch_size"],
+            inner_batch_size=hyperparams["inner_batch_size"],
+            base_lr=hyperparams["base_lr"],
+            head_lr=hyperparams["head_lr"],
+            pos_weight=hyperparams["pos_weight"],
+            log_every=hyperparams["log_every"],
             device=device,
             metrics_filename=metrics_filename,
             wandb=wandb,
             val_df=val_df,
-            val_batch_size=args.val_batch_size,
+            val_batch_size=hyperparams["val_batch_size"],
         )
     finally:
         if wandb:

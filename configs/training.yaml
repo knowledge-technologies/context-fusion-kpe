@@ -2,10 +2,12 @@ training:
   epochs: 5
   outer_batch_size: 140     # sentences per gradient accumulation unit
   inner_batch_size: 70      # sentences per forward pass
+  val_batch_size: 100       # batch size for validation
   base_lr: 2.0e-5           # learning rate for base encoder parameters
   head_lr: 5.0e-5           # learning rate for refinement head parameters
   pos_weight: 5.0           # positive class weight for BCEWithLogitsLoss
-  log_every: 1000           # log loss every N optimizer steps
+  log_every: 500            # log loss every N optimizer steps
+  device: cuda              # device to use (cpu or cuda)
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable
