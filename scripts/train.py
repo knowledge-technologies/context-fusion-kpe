@@ -284,8 +284,8 @@ def parse_args() -> argparse.Namespace:
         description="Train the keyphrase extraction model."
     )
     parser.add_argument(
-        "dataset",
-        required=True,
+        "--dataset",
+        default="kp20k",
         help="Dataset name (default: kp20k)",
     )
     parser.add_argument(
