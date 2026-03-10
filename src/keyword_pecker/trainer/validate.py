@@ -1,9 +1,11 @@
-"""Validation module for keyphrase extraction model.
+"""Evaluation module for keyphrase extraction model.
 
-This module provides validation functionality for the keyphrase extraction model,
+This module provides evaluation functionality for the keyphrase extraction model,
 computing both loss and keyphrase extraction metrics (precision, recall, F1).
+It supports evaluating any dataset split (e.g. "val", "test") by passing the
+``split`` parameter to :func:`evaluate_model`.
 
-The validation logic is adapted from the legacy training script (tmp/train-model.py
+The evaluation logic is adapted from the legacy training script (tmp/train-model.py
 lines 302-531), refactored to use Polars DataFrames and the project's established
 data loading patterns.
 """
@@ -113,25 +115,26 @@ def compute_keyphrase_metrics(
     }
 
 
-def validate(
+def evaluate_model(
     model: KeyphraseModel,
     val_df: pl.DataFrame,
     *,
     batch_size: int,
     pos_weight: float,
     device: torch.device,
+    split: str = "val",
     metrics_filename: Path | None = None,
     wandb: types.ModuleType | None = None,
     global_step: int = 0,
     epoch: int = 0,
 ) -> dict[str, float]:
-    """Run validation and compute loss + keyphrase metrics.
+    """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
-    This function runs the model in evaluation mode over the validation set,
+    This function runs the model in evaluation mode over the given dataset,
     computing both the BCE loss and keyphrase extraction metrics (precision,
     recall, F1) using exact set matching at the document level.
 
-    The validation logic is adapted from the legacy training script
+    The evaluation logic is adapted from the legacy training script
     (tmp/train-model.py lines 302-531), using the project's established
     data loading patterns with Polars DataFrames.
 
@@ -142,6 +145,8 @@ def validate(
         batch_size: Number of sentences per forward pass.
         pos_weight: Positive class weight for BCEWithLogitsLoss.
         device: Device to run inference on.
+        split: Dataset split label used for metric key prefixes and logging,
+            e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
         metrics_filename: Optional Path to JSON metrics file (appends records).
         wandb: The wandb module if W&B tracking is active, or None.
         global_step: Current global training step (for logging).
@@ -149,7 +154,7 @@ def validate(
 
     Returns:
         dict with keys:
-            - val_loss: Mean validation loss over all batches.
+            - ``{split}_loss``: Mean loss over all batches.
             - precision: Keyphrase precision (exact match).
             - recall: Keyphrase recall (exact match).
             - f1: Keyphrase F1 score (exact match).
@@ -181,7 +186,9 @@ def validate(
     num_batches = len(val_loader)
 
     with torch.no_grad():
-        for batch in tqdm.tqdm(val_loader, desc="Validating", total=num_batches):
+        for batch in tqdm.tqdm(
+            val_loader, desc=f"Evaluating ({split})", total=num_batches
+        ):
             input_ids = batch["input_ids"].to(device)
             attention_mask = batch["attention_mask"].to(device)
             target = batch["target"].to(device)
@@ -207,7 +214,7 @@ def validate(
             )
             all_predictions.extend(batch_keywords)
 
-    # Compute mean validation loss
+    # Compute mean loss
     val_loss = total_loss / total_tokens if total_tokens > 0 else 0.0
 
     # Now we need to aggregate predictions and gold labels at document level
@@ -259,17 +266,17 @@ def validate(
 
     # Compute keyphrase metrics
     metrics = compute_keyphrase_metrics(gold_sets, pred_sets)
-    metrics["val_loss"] = val_loss
+    metrics[f"{split}_loss"] = val_loss
 
     # Log metrics to file
     if metrics_filename is not None:
         record = {
             "epoch": epoch,
             "global_step": global_step,
-            "val_loss": val_loss,
-            "val_precision": metrics["precision"],
-            "val_recall": metrics["recall"],
-            "val_f1": metrics["f1"],
+            f"{split}_loss": val_loss,
+            f"{split}_precision": metrics["precision"],
+            f"{split}_recall": metrics["recall"],
+            f"{split}_f1": metrics["f1"],
         }
         with metrics_filename.open("a") as f:
             f.write(json.dumps(record) + "\n")
@@ -278,10 +285,10 @@ def validate(
     if wandb is not None:
         wandb.log(
             {
-                "val/loss": val_loss,
-                "val/precision": metrics["precision"],
-                "val/recall": metrics["recall"],
-                "val/f1": metrics["f1"],
+                f"{split}/loss": val_loss,
+                f"{split}/precision": metrics["precision"],
+                f"{split}/recall": metrics["recall"],
+                f"{split}/f1": metrics["f1"],
             },
             step=global_step,
         )
