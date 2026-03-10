@@ -179,6 +179,8 @@ def train(
 
             # Eagerly free activations
             del logits, loss, input_ids, attention_mask, target
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
             inner_count += 1
 
@@ -432,10 +434,9 @@ def main() -> None:
     config_filename.write_text(json.dumps(hyperparams, indent=2))
     logger.info(f"Run directory: {run_dir}")
 
-    # Load data and model
+    # Load data and model (defer test_df until needed to reduce memory during training)
     train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
     val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
-    test_df = pl.read_parquet(get_derived_path(args.dataset, "test"))
     model = KeyphraseModel(**model_config).to(device)
 
     try:
@@ -459,6 +460,8 @@ def main() -> None:
         # Final evaluation on the test split
         if hyperparams["run_test_eval"]:
             logger.info("Running final evaluation on test split...")
+            # Load test data only when needed (deferred from startup to save memory)
+            test_df = pl.read_parquet(get_derived_path(args.dataset, "test"))
             test_metrics = evaluate_model(
                 model,
                 test_df,

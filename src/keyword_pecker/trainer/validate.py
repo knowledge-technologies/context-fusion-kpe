@@ -214,6 +214,11 @@ def evaluate_model(
             )
             all_predictions.extend(batch_keywords)
 
+            # Free batch tensors to reduce memory fragmentation
+            del input_ids, attention_mask, target, logits, loss, batch_keywords
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
     # Compute mean loss
     val_loss = total_loss / total_tokens if total_tokens > 0 else 0.0
 
@@ -243,6 +248,9 @@ def evaluate_model(
         )
         gold_per_sentence.append(gold_kws[0])
 
+    # Free intermediate data no longer needed
+    del token_ids_list, keyword_masks
+
     # Aggregate to document level
     doc_to_gold: dict[tuple[str, int], set[str]] = {}
     doc_to_pred: dict[tuple[str, int], set[str]] = {}
@@ -263,6 +271,9 @@ def evaluate_model(
     doc_keys = list(doc_to_gold.keys())
     gold_sets = [doc_to_gold[k] for k in doc_keys]
     pred_sets = [doc_to_pred[k] for k in doc_keys]
+
+    # Free aggregation intermediates
+    del gold_per_sentence, all_predictions, doc_ids, doc_rows, doc_to_gold, doc_to_pred
 
     # Compute keyphrase metrics
     metrics = compute_keyphrase_metrics(gold_sets, pred_sets)
