@@ -5,6 +5,8 @@ from typing import Any
 
 import yaml
 
+SINGULARITY_MOUNT_ROOT = "/workspace"
+
 
 def get_project_root() -> Path:
     """Return the project root directory.
@@ -12,6 +14,11 @@ def get_project_root() -> Path:
     Assumes the project structure has src/keyword_pecker/utils/config.py
     and returns the directory containing src/.
     """
+    # Check if running in container with mounted workspace
+    workspace = Path(SINGULARITY_MOUNT_ROOT)
+    if workspace.exists() and (workspace / "src" / "keyword_pecker").exists():
+        return workspace
+
     return Path(__file__).parent.parent.parent.parent
 
 
