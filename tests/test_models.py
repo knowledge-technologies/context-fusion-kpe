@@ -98,3 +98,95 @@ def test_refinement_head_forward_single_sentence():
 
     assert output.shape == (num_sentences, max_seq_len)
     assert output.dtype == torch.float32
+
+
+def test_refinement_head_flexible_context_window():
+    """Test RefinementEncoder with limited left/right context windows."""
+    d_model = 8
+    # Limit to 1 sentence on each side
+    model = RefinementEncoder(
+        d_model=d_model,
+        nhead=2,
+        num_layers=1,
+        dim_feedforward=16,
+        dropout=0.0,
+        max_position_embeddings=32,
+        n_left_ctx=1,
+        n_right_ctx=1,
+    )
+    model.eval()
+
+    # Single document with 5 sentences - only 1 left/right context should be used
+    num_sentences = 5
+    max_seq_len = 4
+    sentence_counts = [5]
+
+    word_embeddings = torch.randn(num_sentences, max_seq_len, d_model)
+    attention_mask = torch.ones(num_sentences, max_seq_len, dtype=torch.long)
+
+    with torch.no_grad():
+        output = model(word_embeddings, attention_mask, sentence_counts)
+
+    assert output.shape == (num_sentences, max_seq_len)
+    assert output.dtype == torch.float32
+
+
+def test_refinement_head_asymmetric_context():
+    """Test RefinementEncoder with asymmetric context windows (different left/right)."""
+    d_model = 8
+    # More left context than right
+    model = RefinementEncoder(
+        d_model=d_model,
+        nhead=2,
+        num_layers=1,
+        dim_feedforward=16,
+        dropout=0.0,
+        max_position_embeddings=32,
+        n_left_ctx=2,
+        n_right_ctx=1,
+    )
+    model.eval()
+
+    # Two documents with 3 sentences each
+    num_sentences = 6
+    max_seq_len = 4
+    sentence_counts = [3, 3]
+
+    word_embeddings = torch.randn(num_sentences, max_seq_len, d_model)
+    attention_mask = torch.ones(num_sentences, max_seq_len, dtype=torch.long)
+
+    with torch.no_grad():
+        output = model(word_embeddings, attention_mask, sentence_counts)
+
+    assert output.shape == (num_sentences, max_seq_len)
+    assert output.dtype == torch.float32
+
+
+def test_refinement_head_zero_context():
+    """Test RefinementEncoder with zero context (no surrounding sentences)."""
+    d_model = 8
+    model = RefinementEncoder(
+        d_model=d_model,
+        nhead=2,
+        num_layers=1,
+        dim_feedforward=16,
+        dropout=0.0,
+        max_position_embeddings=32,
+        n_left_ctx=0,
+        n_right_ctx=0,
+    )
+    model.eval()
+
+    # Single document with 3 sentences - no context should be used
+    num_sentences = 3
+    max_seq_len = 4
+    sentence_counts = [3]
+
+    word_embeddings = torch.randn(num_sentences, max_seq_len, d_model)
+    attention_mask = torch.ones(num_sentences, max_seq_len, dtype=torch.long)
+
+    with torch.no_grad():
+        output = model(word_embeddings, attention_mask, sentence_counts)
+
+    assert output.shape == (num_sentences, max_seq_len)
+    assert output.dtype == torch.float32

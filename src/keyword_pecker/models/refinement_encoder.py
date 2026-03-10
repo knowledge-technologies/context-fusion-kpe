@@ -31,6 +31,8 @@ class RefinementEncoder(nn.Module):
         dim_feedforward: int | None = None,
         dropout: float = 0.1,
         max_position_embeddings: int = 768,
+        n_left_ctx: int | None = None,
+        n_right_ctx: int | None = None,
     ):
         """Initialize the refinement head.
 
@@ -41,6 +43,10 @@ class RefinementEncoder(nn.Module):
             dim_feedforward: Dimension of feedforward network. Defaults to 4 * d_model.
             dropout: Dropout probability.
             max_position_embeddings: Maximum sequence length for positional embeddings.
+            n_left_ctx: Maximum number of preceding sentences to use as context.
+                If None, use all available preceding sentences in the document.
+            n_right_ctx: Maximum number of following sentences to use as context.
+                If None, use all available following sentences in the document.
         """
         super().__init__()
 
@@ -50,6 +56,8 @@ class RefinementEncoder(nn.Module):
         self.dim_feedforward = dim_feedforward or 4 * d_model
         self.dropout = dropout
         self.max_position_embeddings = max_position_embeddings
+        self.n_left_ctx = n_left_ctx
+        self.n_right_ctx = n_right_ctx
 
         # Transformer encoder layers
         encoder_layer = nn.TransformerEncoderLayer(
@@ -111,31 +119,70 @@ class RefinementEncoder(nn.Module):
         sent_len = attention_mask.sum(dim=1)  # (num_sentences,)
 
         # 2. Build contextual input sequences with markers
-        # Pre-context length for each sentence: [0, 1, ..., sc-1] for each document
+        # Pre-context length for each sentence, clamped by n_left_ctx
         pre_context_len = torch.tensor(
-            [j for sc in sentence_counts for j in range(sc)],
+            [
+                min(j, self.n_left_ctx) if self.n_left_ctx is not None else j
+                for sc in sentence_counts
+                for j in range(sc)
+            ],
             dtype=torch.long,
             device=device,
         )
 
-        # Total context length for each sentence (all other sentences in the document)
-        total_context_len = torch.tensor(
-            [sc for sc in sentence_counts for _ in range(sc)],
+        # Post-context length for each sentence, clamped by n_right_ctx
+        post_context_len = torch.tensor(
+            [
+                min(sc - j - 1, self.n_right_ctx)
+                if self.n_right_ctx is not None
+                else (sc - j - 1)
+                for sc in sentence_counts
+                for j in range(sc)
+            ],
             dtype=torch.long,
             device=device,
         )
 
-        # Max input sequence size: (num_sentences - 1) context + max word seq + 2 markers
-        max_size = (num_sentences - 1) + int(sent_len.max().item()) + 2
+        # Max input sequence size based on configured context limits
+        max_left = (
+            self.n_left_ctx
+            if self.n_left_ctx is not None
+            else (max(sentence_counts) - 1)
+        )
+        max_right = (
+            self.n_right_ctx
+            if self.n_right_ctx is not None
+            else (max(sentence_counts) - 1)
+        )
+        max_context = max_left + max_right
+        max_size = max_context + int(sent_len.max().item()) + 2  # +2 for markers
 
         # Allocate input buffer
         input_seq = torch.zeros(num_sentences, max_size, self.d_model, device=device)
 
-        # Place pre-context sentence embeddings
+        # Compute document offset and sentence index within document for each sentence
+        # doc_offset[i] = index of first sentence in document containing sentence i
+        # sent_idx[i] = index of sentence i within its document (0-indexed)
+        doc_offset = []
+        sent_idx = []
+        offset = 0
+        for sc in sentence_counts:
+            for j in range(sc):
+                doc_offset.append(offset)
+                sent_idx.append(j)
+            offset += sc
+
+        # Place pre-context sentence embeddings (immediately preceding sentences)
         for i in range(num_sentences):
             pre_len = pre_context_len[i].item()
             if pre_len > 0:
-                input_seq[i, :pre_len] = sentence_embs[:pre_len]
+                # Get the pre_len sentences immediately before sentence i
+                # Global index of sentence i within batch = doc_offset[i] + sent_idx[i]
+                global_idx = doc_offset[i] + sent_idx[i]
+                # Pre-context: sentences [global_idx - pre_len : global_idx]
+                input_seq[i, :pre_len] = sentence_embs[
+                    global_idx - pre_len : global_idx
+                ]
 
         # Place pre_marker
         input_seq[torch.arange(num_sentences, device=device), pre_context_len] = (
@@ -157,18 +204,19 @@ class RefinementEncoder(nn.Module):
             self.post_marker
         )
 
-        # Place post-context sentence embeddings
-        post_context_len = total_context_len - pre_context_len - 1
+        # Place post-context sentence embeddings (immediately following sentences)
         post_context_start = post_marker_indices + 1
 
         for i in range(num_sentences):
-            pre_len = pre_context_len[i].item()
             post_len = post_context_len[i].item()
             if post_len > 0:
+                # Global index of sentence i within batch
+                global_idx = doc_offset[i] + sent_idx[i]
+                # Post-context: sentences [global_idx + 1 : global_idx + 1 + post_len]
                 start = post_context_start[i].item()
                 end = start + post_len
                 input_seq[i, start:end] = sentence_embs[
-                    pre_len + 1 : pre_len + 1 + post_len
+                    global_idx + 1 : global_idx + 1 + post_len
                 ]
 
         # 3. Add positional embeddings

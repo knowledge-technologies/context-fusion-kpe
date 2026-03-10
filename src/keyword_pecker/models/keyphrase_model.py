@@ -32,6 +32,8 @@ class KeyphraseModel(nn.Module):
         dim_feedforward: int | None = None,
         dropout: float = 0.1,
         max_position_embeddings: int = 768,
+        n_left_ctx: int | None = None,
+        n_right_ctx: int | None = None,
     ):
         """Initialize the keyphrase extraction model.
 
@@ -44,6 +46,10 @@ class KeyphraseModel(nn.Module):
             dim_feedforward: Feedforward dimension. Defaults to 4 * d_model.
             dropout: Dropout probability in refinement head.
             max_position_embeddings: Maximum sequence length for positional embeddings.
+            n_left_ctx: Maximum number of preceding sentences for context in
+                refinement head. If None, use all available.
+            n_right_ctx: Maximum number of following sentences for context in
+                refinement head. If None, use all available.
         """
         super().__init__()
 
@@ -68,6 +74,8 @@ class KeyphraseModel(nn.Module):
             dim_feedforward=dim_feedforward,
             dropout=dropout,
             max_position_embeddings=max_position_embeddings,
+            n_left_ctx=n_left_ctx,
+            n_right_ctx=n_right_ctx,
         )
 
     @property
