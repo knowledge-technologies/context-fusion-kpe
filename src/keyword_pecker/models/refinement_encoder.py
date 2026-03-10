@@ -4,10 +4,22 @@ This module implements the custom transformer head that processes word embedding
 with document context to produce token-level keyphrase predictions.
 """
 
+from typing import NamedTuple
+
 import torch
 import torch.nn as nn
 
 from .base_encoder import mean_pooling
+
+
+class ContextResult(NamedTuple):
+    """Result of context construction for the refinement encoder."""
+
+    input_seq: torch.Tensor  # (num_sentences, max_size, d_model)
+    word_embs_start: torch.Tensor  # (num_sentences,) - start indices of word embeddings
+    word_embs_end: torch.Tensor  # (num_sentences,) - end indices (exclusive)
+    pre_context_len: torch.Tensor  # (num_sentences,) - actual pre-context length used
+    post_context_len: torch.Tensor  # (num_sentences,) - actual post-context length used
 
 
 class RefinementEncoder(nn.Module):
@@ -83,13 +95,16 @@ class RefinementEncoder(nn.Module):
         self.pre_marker = nn.Parameter(torch.randn(self.d_model), requires_grad=True)
         self.post_marker = nn.Parameter(torch.randn(self.d_model), requires_grad=True)
 
-    def forward(
+    def _construct_context(
         self,
         word_embeddings: torch.Tensor,
         attention_mask: torch.Tensor,
         sentence_counts: list[int],
-    ) -> torch.Tensor:
-        """Process word embeddings with document context.
+    ) -> ContextResult:
+        """Construct the contextual input sequence for the transformer.
+
+        Builds an input sequence for each sentence containing:
+            [pre_context] + [PRE_MARKER] + [word_embeddings] + [POST_MARKER] + [post_context]
 
         Args:
             word_embeddings: Word-level embeddings from base encoder,
@@ -97,20 +112,13 @@ class RefinementEncoder(nn.Module):
             attention_mask: Mask indicating valid tokens,
                 shape (num_sentences, max_seq_len).
             sentence_counts: List of sentence counts per document.
-                E.g., [3, 5, 2] means 3 documents with 3, 5, and 2 sentences.
-                sum(sentence_counts) must equal num_sentences.
 
         Returns:
-            Token-level logits of shape (num_sentences, max_seq_len).
-            Logits are placed at positions corresponding to input word embeddings.
+            ContextResult containing the constructed input sequence and indices
+            for extracting word embedding positions.
         """
         device = word_embeddings.device
         num_sentences, max_seq_len, _ = word_embeddings.shape
-
-        assert num_sentences == sum(sentence_counts), (
-            f"Mismatch: word_embeddings has {num_sentences} sentences, "
-            f"but sentence_counts sum to {sum(sentence_counts)}"
-        )
 
         # 1. Compute sentence embeddings via mean pooling
         sentence_embs = mean_pooling(word_embeddings, attention_mask)
@@ -191,21 +199,21 @@ class RefinementEncoder(nn.Module):
 
         # Place word embeddings
         word_embs_start = pre_context_len + 1
-        post_marker_indices = word_embs_start + sent_len.long()
+        word_embs_end = word_embs_start + sent_len.long()
 
         for i in range(num_sentences):
             start = word_embs_start[i].item()
-            end = post_marker_indices[i].item()
+            end = word_embs_end[i].item()
             length = int(sent_len[i].item())
             input_seq[i, start:end] = word_embeddings[i, :length]
 
         # Place post_marker
-        input_seq[torch.arange(num_sentences, device=device), post_marker_indices] = (
+        input_seq[torch.arange(num_sentences, device=device), word_embs_end] = (
             self.post_marker
         )
 
         # Place post-context sentence embeddings (immediately following sentences)
-        post_context_start = post_marker_indices + 1
+        post_context_start = word_embs_end + 1
 
         for i in range(num_sentences):
             post_len = post_context_len[i].item()
@@ -219,23 +227,67 @@ class RefinementEncoder(nn.Module):
                     global_idx + 1 : global_idx + 1 + post_len
                 ]
 
-        # 3. Add positional embeddings
-        positions = torch.arange(max_size, device=device)
-        input_seq = input_seq + self.position_embeddings(positions).unsqueeze(0)
+        return ContextResult(
+            input_seq=input_seq,
+            word_embs_start=word_embs_start,
+            word_embs_end=word_embs_end,
+            pre_context_len=pre_context_len,
+            post_context_len=post_context_len,
+        )
 
-        # 4. Pass through transformer encoder
+    def forward(
+        self,
+        word_embeddings: torch.Tensor,
+        attention_mask: torch.Tensor,
+        sentence_counts: list[int],
+    ) -> torch.Tensor:
+        """Process word embeddings with document context.
+
+        Args:
+            word_embeddings: Word-level embeddings from base encoder,
+                shape (num_sentences, max_seq_len, d_model).
+            attention_mask: Mask indicating valid tokens,
+                shape (num_sentences, max_seq_len).
+            sentence_counts: List of sentence counts per document.
+                E.g., [3, 5, 2] means 3 documents with 3, 5, and 2 sentences.
+                sum(sentence_counts) must equal num_sentences.
+
+        Returns:
+            Token-level logits of shape (num_sentences, max_seq_len).
+            Logits are placed at positions corresponding to input word embeddings.
+        """
+        device = word_embeddings.device
+        num_sentences, max_seq_len, _ = word_embeddings.shape
+
+        assert num_sentences == sum(sentence_counts), (
+            f"Mismatch: word_embeddings has {num_sentences} sentences, "
+            f"but sentence_counts sum to {sum(sentence_counts)}"
+        )
+
+        # 1. Construct contextual input sequence
+        ctx = self._construct_context(word_embeddings, attention_mask, sentence_counts)
+
+        # 2. Add positional embeddings
+        max_size = ctx.input_seq.shape[1]
+        positions = torch.arange(max_size, device=device)
+        input_seq = ctx.input_seq + self.position_embeddings(positions).unsqueeze(0)
+
+        # 3. Pass through transformer encoder
         output = self.transformer_encoder(input_seq)
 
-        # 5. Project to logits and extract word positions
+        # 4. Project to logits and extract word positions
         output = self.projection(output).squeeze(-1)  # (num_sentences, max_size)
+
+        # Compute valid token counts per sentence
+        sent_len = attention_mask.sum(dim=1)  # (num_sentences,)
 
         # Extract logits corresponding to word embedding positions
         masked = torch.zeros(
             num_sentences, max_seq_len, dtype=torch.float32, device=device
         )
         for i in range(num_sentences):
-            start = word_embs_start[i].item()
-            end = post_marker_indices[i].item()
+            start = ctx.word_embs_start[i].item()
+            end = ctx.word_embs_end[i].item()
             length = int(sent_len[i].item())
             masked[i, :length] = output[i, start:end]
 
