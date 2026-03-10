@@ -374,6 +374,7 @@ def main() -> None:
     if args.from_config:
         training_config = train_cfg_tmp.get("training", {})
         hyperparams: dict = {
+            "dataset": args.dataset,
             **training_config,
             **model_config,
         }
@@ -415,8 +416,8 @@ def main() -> None:
     logger.info(f"Run directory: {run_dir}")
 
     # Load data and model
-    train_df = pl.read_parquet(get_derived_path(hyperparams["dataset"], "train"))
-    val_df = pl.read_parquet(get_derived_path(hyperparams["dataset"], "valid"))
+    train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
+    val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
     model = KeyphraseModel(**model_config).to(device)
 
     try:
