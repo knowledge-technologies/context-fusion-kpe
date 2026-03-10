@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer import validate
+from keyword_pecker.trainer import evaluate_model
 from keyword_pecker.utils import get_logger, load_config, setup_wandb
 
 load_dotenv()
@@ -254,12 +254,13 @@ def train(
 
         # Run validation at end of each epoch
         if val_df is not None:
-            val_metrics = validate(
+            val_metrics = evaluate_model(
                 model,
                 val_df,
                 batch_size=val_batch_size,
                 pos_weight=pos_weight,
                 device=device,
+                split="val",
                 metrics_filename=metrics_filename,
                 wandb=wandb,
                 global_step=global_step,
@@ -353,6 +354,18 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Enable Weights & Biases experiment tracking (requires the 'tracking' extra).",
     )
+    parser.add_argument(
+        "--no-test-eval",
+        action="store_true",
+        default=False,
+        help="Skip final evaluation on the test split after training completes.",
+    )
+    parser.add_argument(
+        "--save-model-dir",
+        type=str,
+        default=None,
+        help="Directory to save trained model weights (model.pt) after training.",
+    )
     return parser.parse_args()
 
 
@@ -377,6 +390,8 @@ def main() -> None:
             "dataset": args.dataset,
             **training_config,
             **model_config,
+            "run_test_eval": not args.no_test_eval,
+            "save_model_dir": args.save_model_dir,
         }
     else:
         hyperparams: dict = {
@@ -391,6 +406,8 @@ def main() -> None:
             "device": args.device,
             "val_batch_size": args.val_batch_size,
             **model_config,
+            "run_test_eval": not args.no_test_eval,
+            "save_model_dir": args.save_model_dir,
         }
 
     device = torch.device(hyperparams["device"])
@@ -418,6 +435,7 @@ def main() -> None:
     # Load data and model
     train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
     val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
+    test_df = pl.read_parquet(get_derived_path(args.dataset, "test"))
     model = KeyphraseModel(**model_config).to(device)
 
     try:
@@ -437,6 +455,36 @@ def main() -> None:
             val_df=val_df,
             val_batch_size=hyperparams["val_batch_size"],
         )
+
+        # Final evaluation on the test split
+        if hyperparams["run_test_eval"]:
+            logger.info("Running final evaluation on test split...")
+            test_metrics = evaluate_model(
+                model,
+                test_df,
+                batch_size=hyperparams["val_batch_size"],
+                pos_weight=hyperparams["pos_weight"],
+                device=device,
+                split="test",
+                metrics_filename=metrics_filename,
+                wandb=wandb,
+                global_step=0,
+                epoch=hyperparams["epochs"],
+            )
+            logger.info(
+                f"Test loss: {test_metrics['test_loss']:.6f}, "
+                f"P/R/F1: {test_metrics['precision']:.4f}/"
+                f"{test_metrics['recall']:.4f}/{test_metrics['f1']:.4f}"
+            )
+
+        # Save model weights if requested
+        if hyperparams["save_model_dir"] is not None:
+            save_dir = Path(hyperparams["save_model_dir"])
+            save_dir.mkdir(parents=True, exist_ok=True)
+            weights_path = save_dir / "model.pt"
+            torch.save(model.state_dict(), weights_path)
+            logger.info(f"Model weights saved to {weights_path}")
+
     finally:
         if wandb:
             wandb.finish()
