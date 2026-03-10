@@ -361,10 +361,10 @@ def parse_args() -> argparse.Namespace:
         help="Skip final evaluation on the test split after training completes.",
     )
     parser.add_argument(
-        "--save-model-dir",
-        type=str,
-        default=None,
-        help="Directory to save trained model weights (model.pt) after training.",
+        "--save-weights",
+        action="store_true",
+        default=False,
+        help="Save trained model weights (model.pt) to the run directory after training.",
     )
     return parser.parse_args()
 
@@ -391,7 +391,7 @@ def main() -> None:
             **training_config,
             **model_config,
             "run_test_eval": not args.no_test_eval,
-            "save_model_dir": args.save_model_dir,
+            "save_weights": args.save_weights,
         }
     else:
         hyperparams: dict = {
@@ -407,7 +407,7 @@ def main() -> None:
             "val_batch_size": args.val_batch_size,
             **model_config,
             "run_test_eval": not args.no_test_eval,
-            "save_model_dir": args.save_model_dir,
+            "save_weights": args.save_weights,
         }
 
     device = torch.device(hyperparams["device"])
@@ -477,11 +477,9 @@ def main() -> None:
                 f"{test_metrics['recall']:.4f}/{test_metrics['f1']:.4f}"
             )
 
-        # Save model weights if requested
-        if hyperparams["save_model_dir"] is not None:
-            save_dir = Path(hyperparams["save_model_dir"])
-            save_dir.mkdir(parents=True, exist_ok=True)
-            weights_path = save_dir / "model.pt"
+        # Save model weights into the run directory if requested
+        if hyperparams["save_weights"]:
+            weights_path = run_dir / "model.pt"
             torch.save(model.state_dict(), weights_path)
             logger.info(f"Model weights saved to {weights_path}")
 
