@@ -13,6 +13,7 @@ data loading patterns.
 from __future__ import annotations
 
 import json
+import random
 import re
 import types
 from pathlib import Path
@@ -127,7 +128,8 @@ def evaluate_model(
     wandb: types.ModuleType | None = None,
     global_step: int = 0,
     epoch: int = 0,
-) -> dict[str, float]:
+    sample_seed: int = 42,
+) -> dict[str, float | list[dict[str, str | int | list[str]]]]:
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
     This function runs the model in evaluation mode over the given dataset,
@@ -151,6 +153,8 @@ def evaluate_model(
         wandb: The wandb module if W&B tracking is active, or None.
         global_step: Current global training step (for logging).
         epoch: Current epoch number (for logging).
+        sample_seed: Random seed for sampling documents (default: 42). Set to None
+            for non-reproducible sampling.
 
     Returns:
         dict with keys:
@@ -158,6 +162,9 @@ def evaluate_model(
             - precision: Keyphrase precision (exact match).
             - recall: Keyphrase recall (exact match).
             - f1: Keyphrase F1 score (exact match).
+            - samples: List of dicts with random document samples for qualitative
+              analysis. Each dict has keys: doc_id, doc_row, gold_keywords,
+              pred_keywords (keyword lists are sorted).
     """
     model.eval()
 
@@ -272,12 +279,34 @@ def evaluate_model(
     gold_sets = [doc_to_gold[k] for k in doc_keys]
     pred_sets = [doc_to_pred[k] for k in doc_keys]
 
+    # Capture random samples for qualitative analysis
+    num_samples = min(15, len(doc_keys))
+    rng = random.Random(sample_seed)
+    sample_indices = rng.sample(range(len(doc_keys)), num_samples)
+    samples = []
+    for idx in sample_indices:
+        doc_key = doc_keys[idx]
+        samples.append(
+            {
+                "doc_id": doc_key[0],
+                "doc_row": doc_key[1],
+                "gold_keywords": sorted(gold_sets[idx]),
+                "pred_keywords": sorted(pred_sets[idx]),
+            }
+        )
+
     # Free aggregation intermediates
     del gold_per_sentence, all_predictions, doc_ids, doc_rows, doc_to_gold, doc_to_pred
 
     # Compute keyphrase metrics
-    metrics = compute_keyphrase_metrics(gold_sets, pred_sets)
+    base_metrics = compute_keyphrase_metrics(gold_sets, pred_sets)
+    metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = {
+        "precision": base_metrics["precision"],
+        "recall": base_metrics["recall"],
+        "f1": base_metrics["f1"],
+    }
     metrics[f"{split}_loss"] = val_loss
+    metrics["samples"] = samples
 
     # Log metrics to file
     if metrics_filename is not None:
