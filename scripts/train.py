@@ -30,6 +30,8 @@ import torch
 import tqdm
 from dotenv import load_dotenv
 
+from transformers import get_linear_schedule_with_warmup
+
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model
@@ -93,6 +95,7 @@ def train(
     save_weights: bool = False,
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
+    warmup_ratio: float = 0.1,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -121,13 +124,24 @@ def train(
         save_weights: If True, save model weights after each epoch (except the last).
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
+        warmup_ratio: Fraction of training steps for warmup (default: 0.1).
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
     )
 
-    # reduction="none" so we can apply the attention mask and compute a masked
-    # mean: (loss * attn_mask).sum() / attn_mask.sum()
+    total_steps = math.ceil(len(train_df) / outer_batch_size) * epochs
+    warmup_steps = int(total_steps * warmup_ratio)
+
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_steps,
+        num_training_steps=total_steps,
+    )
+    logger.info(
+        f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
+    )
+
     loss_fn = torch.nn.BCEWithLogitsLoss(
         reduction="none",
         pos_weight=torch.tensor([[pos_weight]], device=device),
@@ -190,6 +204,7 @@ def train(
 
             if inner_count == inner_per_outer:
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
 
                 if last_loss is not None:
@@ -204,12 +219,19 @@ def train(
                             "outer_step": outer_step,
                             "global_step": global_step,
                             "train_loss": last_loss,
+                            "learning_rate": scheduler.get_last_lr()[0],
                         }
                         metrics_file.write(json.dumps(record) + "\n")
                         metrics_file.flush()
 
                         if wandb:
-                            wandb.log({"train/loss": last_loss}, step=global_step)
+                            wandb.log(
+                                {
+                                    "train/loss": last_loss,
+                                    "train/learning_rate": scheduler.get_last_lr()[0],
+                                },
+                                step=global_step,
+                            )
 
                 outer_step += 1
                 global_step += 1
@@ -219,6 +241,7 @@ def train(
         # Step on any remaining accumulated gradients (last incomplete outer chunk)
         if inner_count > 0:
             optimizer.step()
+            scheduler.step()
             optimizer.zero_grad()
 
             if last_loss is not None:
@@ -233,12 +256,19 @@ def train(
                         "outer_step": outer_step,
                         "global_step": global_step,
                         "train_loss": last_loss,
+                        "learning_rate": scheduler.get_last_lr()[0],
                     }
                     metrics_file.write(json.dumps(record) + "\n")
                     metrics_file.flush()
 
                     if wandb:
-                        wandb.log({"train/loss": last_loss}, step=global_step)
+                        wandb.log(
+                            {
+                                "train/loss": last_loss,
+                                "train/learning_rate": scheduler.get_last_lr()[0],
+                            },
+                            step=global_step,
+                        )
 
                 global_step += 1
                 progress.update(1)
@@ -343,6 +373,12 @@ def parse_args() -> argparse.Namespace:
         help="Positive class weight for BCEWithLogitsLoss (default: 5.0)",
     )
     parser.add_argument(
+        "--warmup-ratio",
+        type=float,
+        default=0.1,
+        help="Fraction of training steps for warmup (default: 0.1)",
+    )
+    parser.add_argument(
         "--log-every",
         type=int,
         default=1000,
@@ -413,6 +449,7 @@ def main() -> None:
             "base_lr": args.base_lr,
             "head_lr": args.head_lr,
             "pos_weight": args.pos_weight,
+            "warmup_ratio": args.warmup_ratio,
             "log_every": args.log_every,
             "device": args.device,
             "val_batch_size": args.val_batch_size,
@@ -458,6 +495,7 @@ def main() -> None:
             base_lr=hyperparams["base_lr"],
             head_lr=hyperparams["head_lr"],
             pos_weight=hyperparams["pos_weight"],
+            warmup_ratio=hyperparams["warmup_ratio"],
             log_every=hyperparams["log_every"],
             device=device,
             metrics_filename=metrics_filename,
