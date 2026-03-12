@@ -14,6 +14,7 @@ Typical usage:
 """
 
 from .base_encoder import BaseEncoder, mean_pooling
+from .inference import predict_keyphrases
 from .keyphrase_model import KeyphraseModel
 from .refinement_encoder import RefinementEncoder
 
@@ -22,4 +23,5 @@ __all__ = [
     "KeyphraseModel",
     "RefinementEncoder",
     "mean_pooling",
+    "predict_keyphrases",
 ]
