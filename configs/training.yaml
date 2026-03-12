@@ -7,7 +7,7 @@ training:
   head_lr: 5.0e-5           # learning rate for refinement head parameters
   pos_weight: 5.0           # positive class weight for BCEWithLogitsLoss
   warmup_ratio: 0.1         # fraction of training steps for warmup
-  log_every: 500            # log loss every N optimizer steps
+  log_every: 1000           # log loss every N optimizer steps
   device: cuda              # device to use (cpu or cuda)
 
 wandb:
