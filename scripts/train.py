@@ -89,6 +89,8 @@ def train(
     device: torch.device,
     metrics_filename: Path,
     wandb: types.ModuleType | None,
+    run_dir: Path | None = None,
+    save_weights: bool = False,
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
 ) -> None:
@@ -115,6 +117,8 @@ def train(
         device: Device to run on.
         metrics_filename: Path to the JSONL file where metrics are appended.
         wandb: The wandb module if W&B tracking is active, or ``None``.
+        run_dir: Directory to save epoch checkpoint weights (model_e1.pt, model_e2.pt, ...).
+        save_weights: If True, save model weights after each epoch (except the last).
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
     """
@@ -273,6 +277,11 @@ def train(
                 f"P/R/F1: {val_metrics['precision']:.4f}/"
                 f"{val_metrics['recall']:.4f}/{val_metrics['f1']:.4f}"
             )
+
+        if save_weights and run_dir is not None and epoch < epochs - 1:
+            epoch_weights_path = run_dir / f"model_e{epoch + 1}.pt"
+            torch.save(model.state_dict(), epoch_weights_path)
+            logger.info(f"Epoch {epoch + 1} weights saved to {epoch_weights_path}")
 
     metrics_file.close()
 
@@ -453,6 +462,8 @@ def main() -> None:
             device=device,
             metrics_filename=metrics_filename,
             wandb=wandb,
+            run_dir=run_dir,
+            save_weights=hyperparams["save_weights"],
             val_df=val_df,
             val_batch_size=hyperparams["val_batch_size"],
         )
