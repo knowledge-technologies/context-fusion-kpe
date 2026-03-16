@@ -81,6 +81,100 @@ def extract_keyphrases_from_predictions(
     return all_keywords
 
 
+def extract_ranked_keyphrases(
+    predictions: torch.Tensor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    tokenizer,
+) -> list[list[tuple[str, float]]]:
+    """Extract keyphrases ranked by model confidence.
+
+    Converts logits to probabilities via sigmoid, then extracts keywords
+    ranked by confidence score (highest first).
+
+    Args:
+        predictions: Model logits of shape (batch_size, max_seq_len).
+        input_ids: Token IDs of shape (batch_size, max_seq_len).
+        attention_mask: Attention mask of shape (batch_size, max_seq_len).
+        tokenizer: HuggingFace tokenizer for decoding tokens.
+
+    Returns:
+        List of keyword lists with confidence scores, one per sentence.
+        Each element is a list of (keyword, confidence) tuples sorted by
+        confidence descending.
+    """
+    batch_size = predictions.shape[0]
+    all_ranked_keywords: list[list[tuple[str, float]]] = []
+
+    # Convert logits to probabilities
+    probs = torch.sigmoid(predictions)
+
+    for i in range(batch_size):
+        seq_len = attention_mask[i].sum().item()
+
+        # Skip BOS (index 0) and EOS (last token before padding)
+        token_ids = input_ids[i, 1 : seq_len - 1]
+        token_probs = probs[i, 1 : seq_len - 1]
+
+        # Group consecutive tokens with high probability into keyphrases
+        # A keyphrase is formed by consecutive tokens where at least one has prob > 0.5
+        keywords_with_scores: list[tuple[str, float]] = []
+
+        current_tokens: list[int] = []
+        current_probs: list[float] = []
+        has_keyword = False
+
+        for j in range(len(token_ids)):
+            token_id = token_ids[j].item()
+            prob = token_probs[j].item()
+
+            if token_id == 0:  # Padding or special token
+                if current_tokens and has_keyword:
+                    decoded = tokenizer.decode(torch.tensor(current_tokens))
+                    keywords = decoded.split("<s>")
+                    keywords = [
+                        re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
+                    ]
+                    max_prob = max(current_probs)
+                    for kw in keywords:
+                        keywords_with_scores.append((kw, max_prob))
+                current_tokens = []
+                current_probs = []
+                has_keyword = False
+                continue
+
+            current_tokens.append(token_id)
+            current_probs.append(prob)
+            if prob > 0.5:
+                has_keyword = True
+
+        # Handle last keyphrase
+        if current_tokens and has_keyword:
+            decoded = tokenizer.decode(torch.tensor(current_tokens))
+            keywords = decoded.split("<s>")
+            keywords = [
+                re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
+            ]
+            max_prob = max(current_probs)
+            for kw in keywords:
+                keywords_with_scores.append((kw, max_prob))
+
+        # Sort by confidence descending
+        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+        # Deduplicate keywords, keeping highest score
+        seen: set[str] = set()
+        deduped: list[tuple[str, float]] = []
+        for kw, score in keywords_with_scores:
+            if kw not in seen:
+                seen.add(kw)
+                deduped.append((kw, score))
+
+        all_ranked_keywords.append(deduped)
+
+    return all_ranked_keywords
+
+
 def compute_keyphrase_metrics(
     gold_keywords: list[set[str]],
     pred_keywords: list[set[str]],
@@ -116,6 +210,50 @@ def compute_keyphrase_metrics(
     }
 
 
+def compute_metrics_at_k(
+    gold_keywords: list[set[str]],
+    pred_keywords_ranked: list[list[tuple[str, float]]],
+    k_values: list[int],
+) -> dict[str, float]:
+    """Compute precision@k, recall@k, and F1@k for each k value.
+
+    For each document, takes the top-k predicted keywords (ranked by confidence)
+    and computes metrics against the gold keywords.
+
+    Args:
+        gold_keywords: List of gold keyword sets, one per document.
+        pred_keywords_ranked: List of predicted keyword lists with confidence scores,
+            one per document. Each list contains (keyword, score) tuples sorted
+            by confidence descending.
+        k_values: List of k values to compute metrics for (e.g., [5, 10, 15]).
+
+    Returns:
+        dict with keys like precision@5, recall@5, f1@5, etc.
+    """
+    metrics: dict[str, float] = {}
+
+    for k in k_values:
+        tp = fp = fn = 0
+
+        for gold, pred_ranked in zip(gold_keywords, pred_keywords_ranked):
+            # Take top-k predictions
+            top_k = set(kw for kw, _ in pred_ranked[:k])
+
+            tp += len(gold & top_k)
+            fp += len(top_k - gold)
+            fn += len(gold - top_k)
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
+
+        metrics[f"precision@{k}"] = precision
+        metrics[f"recall@{k}"] = recall
+        metrics[f"f1@{k}"] = f1
+
+    return metrics
+
+
 def evaluate_model(
     model: KeyphraseModel,
     val_df: pl.DataFrame,
@@ -124,6 +262,7 @@ def evaluate_model(
     pos_weight: float,
     device: torch.device,
     split: str = "val",
+    k_values: list[int] | None = None,
     metrics_filename: Path | None = None,
     wandb: types.ModuleType | None = None,
     global_step: int = 0,
@@ -133,8 +272,8 @@ def evaluate_model(
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
     This function runs the model in evaluation mode over the given dataset,
-    computing both the BCE loss and keyphrase extraction metrics (precision,
-    recall, F1) using exact set matching at the document level.
+    computing both the BCE loss and keyphrase extraction metrics (precision@k,
+    recall@k, F1@k) using exact set matching at the document level.
 
     The evaluation logic is adapted from the legacy training script
     (tmp/train-model.py lines 302-531), using the project's established
@@ -149,6 +288,7 @@ def evaluate_model(
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
+        k_values: List of k values for @k metrics (default: [5, 10, 15]).
         metrics_filename: Optional Path to JSON metrics file (appends records).
         wandb: The wandb module if W&B tracking is active, or None.
         global_step: Current global training step (for logging).
@@ -159,13 +299,14 @@ def evaluate_model(
     Returns:
         dict with keys:
             - ``{split}_loss``: Mean loss over all batches.
-            - precision: Keyphrase precision (exact match).
-            - recall: Keyphrase recall (exact match).
-            - f1: Keyphrase F1 score (exact match).
+            - precision@k, recall@k, f1@k for each k in k_values.
             - samples: List of dicts with random document samples for qualitative
               analysis. Each dict has keys: doc_id, doc_row, gold_keywords,
               pred_keywords (keyword lists are sorted).
     """
+    if k_values is None:
+        k_values = [5, 10, 15]
+
     model.eval()
 
     # Create dataloader for validation (no shuffling, use batch_size for both levels)
@@ -186,9 +327,8 @@ def evaluate_model(
     total_loss = 0.0
     total_tokens = 0
 
-    # Collect predictions per sentence
-    # We'll aggregate to document level after the loop
-    all_predictions: list[list[str]] = []
+    # Collect ranked predictions per sentence (with confidence scores)
+    all_ranked_predictions: list[list[tuple[str, float]]] = []
 
     num_batches = len(val_loader)
 
@@ -212,17 +352,17 @@ def evaluate_model(
             total_loss += batch_loss
             total_tokens += batch_tokens
 
-            # Extract keyphrases from predictions
-            batch_keywords = extract_keyphrases_from_predictions(
+            # Extract ranked keyphrases from predictions
+            batch_ranked_keywords = extract_ranked_keyphrases(
                 logits.cpu(),
                 input_ids.cpu(),
                 attention_mask.cpu(),
                 model.tokenizer,
             )
-            all_predictions.extend(batch_keywords)
+            all_ranked_predictions.extend(batch_ranked_keywords)
 
             # Free batch tensors to reduce memory fragmentation
-            del input_ids, attention_mask, target, logits, loss, batch_keywords
+            del input_ids, attention_mask, target, logits, loss, batch_ranked_keywords
             if device.type == "cuda":
                 torch.cuda.empty_cache()
 
@@ -234,7 +374,7 @@ def evaluate_model(
     doc_ids = val_df["doc_id"].to_list()
     doc_rows = val_df["doc_row"].to_list()
 
-    # Extract gold keywords from each sentence using the same logic as predictions
+    # Extract gold keywords from each sentence
     gold_per_sentence: list[list[str]] = []
     token_ids_list = val_df["token_ids"].to_list()
     keyword_masks = val_df["keyword_mask"].to_list()
@@ -246,9 +386,9 @@ def evaluate_model(
         gold_mask = torch.tensor(kw_mask, dtype=torch.float).unsqueeze(0)
         gold_attn = torch.ones(1, seq_len, dtype=torch.long)
 
-        # Extract gold keywords using the same function
+        # Extract gold keywords
         gold_kws = extract_keyphrases_from_predictions(
-            gold_mask,  # Use keyword_mask as "predictions" (already 0/1)
+            gold_mask,
             gold_input_ids,
             gold_attn,
             model.tokenizer,
@@ -260,24 +400,35 @@ def evaluate_model(
 
     # Aggregate to document level
     doc_to_gold: dict[tuple[str, int], set[str]] = {}
-    doc_to_pred: dict[tuple[str, int], set[str]] = {}
+    doc_to_pred_ranked: dict[tuple[str, int], list[tuple[str, float]]] = {}
 
     for i, (doc_id, doc_row) in enumerate(zip(doc_ids, doc_rows)):
         key = (doc_id, doc_row)
 
         if key not in doc_to_gold:
             doc_to_gold[key] = set()
-            doc_to_pred[key] = set()
+            doc_to_pred_ranked[key] = []
 
         doc_to_gold[key].update(gold_per_sentence[i])
 
-        if i < len(all_predictions):
-            doc_to_pred[key].update(all_predictions[i])
+        if i < len(all_ranked_predictions):
+            doc_to_pred_ranked[key].extend(all_ranked_predictions[i])
+
+    # Sort predictions by confidence and deduplicate per document
+    for key in doc_to_pred_ranked:
+        seen: set[str] = set()
+        deduped: list[tuple[str, float]] = []
+        for kw, score in doc_to_pred_ranked[key]:
+            if kw not in seen:
+                seen.add(kw)
+                deduped.append((kw, score))
+        deduped.sort(key=lambda x: x[1], reverse=True)
+        doc_to_pred_ranked[key] = deduped
 
     # Convert to lists for metric computation (preserve order)
     doc_keys = list(doc_to_gold.keys())
     gold_sets = [doc_to_gold[k] for k in doc_keys]
-    pred_sets = [doc_to_pred[k] for k in doc_keys]
+    pred_ranked = [doc_to_pred_ranked[k] for k in doc_keys]
 
     # Capture random samples for qualitative analysis
     num_samples = min(15, len(doc_keys))
@@ -291,48 +442,51 @@ def evaluate_model(
                 "doc_id": doc_key[0],
                 "doc_row": doc_key[1],
                 "gold_keywords": sorted(gold_sets[idx]),
-                "pred_keywords": sorted(pred_sets[idx]),
+                "pred_keywords": [kw for kw, _ in pred_ranked[idx]],
             }
         )
 
     # Free aggregation intermediates
-    del gold_per_sentence, all_predictions, doc_ids, doc_rows, doc_to_gold, doc_to_pred
+    del (
+        gold_per_sentence,
+        all_ranked_predictions,
+        doc_ids,
+        doc_rows,
+        doc_to_gold,
+        doc_to_pred_ranked,
+    )
 
-    # Compute keyphrase metrics
-    base_metrics = compute_keyphrase_metrics(gold_sets, pred_sets)
-    metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = {
-        "precision": base_metrics["precision"],
-        "recall": base_metrics["recall"],
-        "f1": base_metrics["f1"],
-    }
+    # Compute @k metrics
+    at_k_metrics = compute_metrics_at_k(gold_sets, pred_ranked, k_values)
+    metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = dict(
+        at_k_metrics
+    )
     metrics[f"{split}_loss"] = val_loss
     metrics["samples"] = samples
 
     # Log metrics to file
     if metrics_filename is not None:
-        record = {
+        record: dict = {
             "epoch": epoch,
             "global_step": global_step,
             f"{split}_loss": val_loss,
-            f"{split}_precision": metrics["precision"],
-            f"{split}_recall": metrics["recall"],
-            f"{split}_f1": metrics["f1"],
-            f"{split}_samples": metrics["samples"],
         }
+        for k in k_values:
+            record[f"{split}_precision@{k}"] = at_k_metrics[f"precision@{k}"]
+            record[f"{split}_recall@{k}"] = at_k_metrics[f"recall@{k}"]
+            record[f"{split}_f1@{k}"] = at_k_metrics[f"f1@{k}"]
+        record[f"{split}_samples"] = metrics["samples"]
         with metrics_filename.open("a") as f:
             f.write(json.dumps(record) + "\n")
 
     # Log metrics to W&B
     if wandb is not None:
-        wandb.log(
-            {
-                f"{split}/loss": val_loss,
-                f"{split}/precision": metrics["precision"],
-                f"{split}/recall": metrics["recall"],
-                f"{split}/f1": metrics["f1"],
-            },
-            step=global_step,
-        )
+        wandb_log: dict = {f"{split}/loss": val_loss}
+        for k in k_values:
+            wandb_log[f"{split}/precision@{k}"] = at_k_metrics[f"precision@{k}"]
+            wandb_log[f"{split}/recall@{k}"] = at_k_metrics[f"recall@{k}"]
+            wandb_log[f"{split}/f1@{k}"] = at_k_metrics[f"f1@{k}"]
+        wandb.log(wandb_log, step=global_step)
         samples_table = wandb.Table(
             columns=["doc_id", "doc_row", "gold_keywords", "pred_keywords"],
             data=[
