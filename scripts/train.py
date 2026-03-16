@@ -96,6 +96,7 @@ def train(
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
     warmup_ratio: float = 0.1,
+    k_values: list[int] | None = None,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -125,6 +126,7 @@ def train(
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
         warmup_ratio: Fraction of training steps for warmup (default: 0.1).
+        k_values: List of k values for @k metrics (default: [5, 10, 15]).
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -297,15 +299,16 @@ def train(
                 pos_weight=pos_weight,
                 device=device,
                 split="val",
+                k_values=k_values,
                 metrics_filename=metrics_filename,
                 wandb=wandb,
                 global_step=global_step,
                 epoch=epoch + 1,
             )
+            k_val = k_values[0] if k_values else 5
             logger.info(
                 f"Epoch {epoch + 1} val loss: {val_metrics['val_loss']:.6f}, "
-                f"P/R/F1: {val_metrics['precision']:.4f}/"
-                f"{val_metrics['recall']:.4f}/{val_metrics['f1']:.4f}"
+                f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
             )
 
         if save_weights and run_dir is not None and epoch < epochs - 1:
@@ -413,6 +416,13 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help="Save trained model weights (model.pt) to the run directory after training.",
     )
+    parser.add_argument(
+        "--k-values",
+        type=int,
+        nargs="+",
+        default=[5, 10, 15],
+        help="k values for @k metrics (default: 5 10 15)",
+    )
     return parser.parse_args()
 
 
@@ -453,6 +463,7 @@ def main() -> None:
             "log_every": args.log_every,
             "device": args.device,
             "val_batch_size": args.val_batch_size,
+            "k_values": args.k_values,
             **model_config,
             "run_test_eval": not args.no_test_eval,
             "save_weights": args.save_weights,
@@ -504,6 +515,7 @@ def main() -> None:
             save_weights=hyperparams["save_weights"],
             val_df=val_df,
             val_batch_size=hyperparams["val_batch_size"],
+            k_values=hyperparams.get("k_values"),
         )
 
         # Final evaluation on the test split
@@ -518,15 +530,16 @@ def main() -> None:
                 pos_weight=hyperparams["pos_weight"],
                 device=device,
                 split="test",
+                k_values=hyperparams.get("k_values"),
                 metrics_filename=metrics_filename,
                 wandb=wandb,
                 global_step=0,
                 epoch=hyperparams["epochs"],
             )
+            k_val = hyperparams.get("k_values", [5])[0]
             logger.info(
                 f"Test loss: {test_metrics['test_loss']:.6f}, "
-                f"P/R/F1: {test_metrics['precision']:.4f}/"
-                f"{test_metrics['recall']:.4f}/{test_metrics['f1']:.4f}"
+                f"F1@{k_val}: {test_metrics[f'f1@{k_val}']:.4f}"
             )
 
         # Save model weights into the run directory if requested
