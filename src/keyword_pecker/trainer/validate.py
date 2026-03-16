@@ -317,6 +317,7 @@ def evaluate_model(
             f"{split}_precision": metrics["precision"],
             f"{split}_recall": metrics["recall"],
             f"{split}_f1": metrics["f1"],
+            f"{split}_samples": metrics["samples"],
         }
         with metrics_filename.open("a") as f:
             f.write(json.dumps(record) + "\n")
@@ -332,6 +333,14 @@ def evaluate_model(
             },
             step=global_step,
         )
+        samples_table = wandb.Table(
+            columns=["doc_id", "doc_row", "gold_keywords", "pred_keywords"],
+            data=[
+                [s["doc_id"], s["doc_row"], s["gold_keywords"], s["pred_keywords"]]
+                for s in metrics["samples"]
+            ],
+        )
+        wandb.log({f"{split}/samples": samples_table}, step=global_step)
 
     # Restore model to training mode
     model.train()
