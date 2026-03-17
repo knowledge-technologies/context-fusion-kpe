@@ -126,7 +126,7 @@ def train(
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
         warmup_ratio: Fraction of training steps for warmup (default: 0.1).
-        k_values: List of k values for @k metrics (default: [5, 10, 15]).
+        k_values: List of k values for @k metrics (default: [5, 10]).
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -420,8 +420,8 @@ def parse_args() -> argparse.Namespace:
         "--k-values",
         type=int,
         nargs="+",
-        default=[5, 10, 15],
-        help="k values for @k metrics (default: 5 10 15)",
+        default=[5, 10],
+        help="k values for @k metrics (default: 5 10)",
     )
     return parser.parse_args()
 

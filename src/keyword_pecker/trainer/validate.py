@@ -132,7 +132,7 @@ def compute_metrics_at_k(
         pred_keywords_ranked: List of predicted keyword lists with confidence scores,
             one per document. Each list contains (keyword, score) tuples sorted
             by confidence descending.
-        k_values: List of k values to compute metrics for (e.g., [5, 10, 15]).
+        k_values: List of k values to compute metrics for (e.g., [5, 10]).
 
     Returns:
         dict with keys like precision@5, recall@5, f1@5, etc.
@@ -195,7 +195,7 @@ def evaluate_model(
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
-        k_values: List of k values for @k metrics (default: [5, 10, 15]).
+        k_values: List of k values for @k metrics (default: [5, 10]).
         metrics_filename: Optional Path to JSON metrics file (appends records).
         wandb: The wandb module if W&B tracking is active, or None.
         global_step: Current global training step (for logging).
@@ -212,7 +212,7 @@ def evaluate_model(
               pred_keywords (keyword lists are sorted).
     """
     if k_values is None:
-        k_values = [5, 10, 15]
+        k_values = [5, 10]
 
     model.eval()
 

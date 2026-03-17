@@ -9,6 +9,7 @@ training:
   warmup_ratio: 0.1         # fraction of training steps for warmup
   log_every: 1000           # log loss every N optimizer steps
   device: cuda              # device to use (cpu or cuda)
+  k_values: [5, 10]         # k values for @k metrics
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable
