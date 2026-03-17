@@ -15,3 +15,6 @@ tmp
 
 # wandb logs
 /wandb
+
+# MyST build outputs
+_build
