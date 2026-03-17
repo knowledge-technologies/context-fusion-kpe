@@ -7,6 +7,7 @@ keyphrases from text using a trained KeyphraseModel.
 from __future__ import annotations
 
 import re
+from typing import NamedTuple
 
 import spacy
 import torch
@@ -14,6 +15,99 @@ import torch
 from keyword_pecker.data import load_spacy_model
 
 from .keyphrase_model import KeyphraseModel
+
+
+class KeyphraseResult(NamedTuple):
+    keyword: str
+    score: float
+
+
+def extract_ranked_keyphrases(
+    predictions: torch.Tensor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    tokenizer,
+) -> list[list[tuple[str, float]]]:
+    """Extract keyphrases ranked by model confidence.
+
+    Converts logits to probabilities via sigmoid, then extracts keywords
+    ranked by confidence score (highest first).
+
+    Args:
+        predictions: Model logits of shape (batch_size, max_seq_len).
+        input_ids: Token IDs of shape (batch_size, max_seq_len).
+        attention_mask: Attention mask of shape (batch_size, max_seq_len).
+        tokenizer: HuggingFace tokenizer for decoding tokens.
+
+    Returns:
+        List of keyword lists with confidence scores, one per sentence.
+        Each element is a list of (keyword, confidence) tuples sorted by
+        confidence descending.
+    """
+    batch_size = predictions.shape[0]
+    all_ranked_keywords: list[list[tuple[str, float]]] = []
+
+    probs = torch.sigmoid(predictions)
+
+    for i in range(batch_size):
+        seq_len = attention_mask[i].sum().item()
+
+        token_ids = input_ids[i, 1 : seq_len - 1]
+        token_probs = probs[i, 1 : seq_len - 1]
+
+        keywords_with_scores: list[tuple[str, float]] = []
+
+        current_tokens: list[int] = []
+        current_probs: list[float] = []
+        has_keyword = False
+
+        for j in range(len(token_ids)):
+            token_id = token_ids[j].item()
+            prob = token_probs[j].item()
+
+            if token_id == 0:
+                if current_tokens and has_keyword:
+                    decoded = tokenizer.decode(torch.tensor(current_tokens))
+                    keywords = decoded.split("<s>")
+                    keywords = [
+                        re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
+                    ]
+                    max_prob = max(current_probs)
+                    for kw in keywords:
+                        keywords_with_scores.append((kw, max_prob))
+                current_tokens = []
+                current_probs = []
+                has_keyword = False
+                continue
+
+            current_tokens.append(token_id)
+            current_probs.append(prob)
+            if prob > 0.5:
+                has_keyword = True
+
+        if current_tokens and has_keyword:
+            decoded = tokenizer.decode(torch.tensor(current_tokens))
+            keywords = decoded.split("<s>")
+            keywords = [
+                re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
+            ]
+            max_prob = max(current_probs)
+            for kw in keywords:
+                keywords_with_scores.append((kw, max_prob))
+
+        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+        seen: set[str] = set()
+        deduped: list[tuple[str, float]] = []
+        for kw, score in keywords_with_scores:
+            if kw not in seen:
+                seen.add(kw)
+                deduped.append((kw, score))
+
+        all_ranked_keywords.append(deduped)
+
+    return all_ranked_keywords
+
 
 _spacy_model: spacy.Language | None = None
 
@@ -26,44 +120,14 @@ def _get_spacy_model() -> spacy.Language:
     return _spacy_model
 
 
-def _extract_keyphrases_from_logits(
-    logits: torch.Tensor,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    tokenizer,
-) -> list[str]:
-    """Extract keyphrase strings from model logits for a single sentence.
-
-    Args:
-        logits: Model logits of shape (seq_len,).
-        input_ids: Token IDs of shape (seq_len,).
-        attention_mask: Attention mask of shape (seq_len,).
-        tokenizer: HuggingFace tokenizer for decoding tokens.
-
-    Returns:
-        List of keyphrase strings found in this sentence.
-    """
-    seq_len = attention_mask.sum().item()
-
-    binary_pred = (logits > 0).long()
-    masked_pred = binary_pred * input_ids
-
-    pred_tokens = masked_pred[1 : seq_len - 1]
-
-    decoded = tokenizer.decode(pred_tokens)
-
-    keywords = decoded.split("<s>")
-    keywords = [re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()]
-
-    return keywords
-
-
 def predict_keyphrases(
     model: KeyphraseModel,
     text: str,
     nlp: spacy.Language | None = None,
     device: torch.device | str | None = None,
-) -> list[str]:
+    nr_keywords: int | None = None,
+    return_scores: bool = False,
+) -> list[str] | list[KeyphraseResult]:
     """Extract keyphrases from text using a trained KeyphraseModel.
 
     This function handles the full inference pipeline:
@@ -78,16 +142,33 @@ def predict_keyphrases(
         nlp: Optional spaCy model for sentence segmentation.
             If None, loads en_core_web_sm on first call (cached for reuse).
         device: Device for inference. If None, uses the device of model parameters.
+        nr_keywords: Maximum number of keywords to return. If None, returns all
+            detected keywords.
+        return_scores: If True, returns list of KeyphraseResult with confidence
+            scores. If False, returns list of keyword strings only.
 
     Returns:
-        List of unique keyphrase strings in order of first appearance in text.
+        If return_scores=False: List of unique keyphrase strings sorted by
+            confidence (highest first).
+        If return_scores=True: List of KeyphraseResult(keyword, score) tuples
+            sorted by confidence (highest first).
 
     Example:
         >>> from keyword_pecker.models import KeyphraseModel, predict_keyphrases
         >>> model = KeyphraseModel.from_pretrained("path/to/checkpoint")
+        >>> # Get keywords only (backward compatible)
         >>> keyphrases = predict_keyphrases(model, "Machine learning is a subset of AI.")
         >>> print(keyphrases)
         ['machine learning', 'ai']
+        >>> # Get keywords with confidence scores
+        >>> results = predict_keyphrases(model, "Machine learning is a subset of AI.",
+        ...                              return_scores=True)
+        >>> for result in results:
+        ...     print(f"{result.keyword}: {result.score:.2f}")
+        machine learning: 0.95
+        ai: 0.87
+        >>> # Limit to top 3 keywords
+        >>> top_3 = predict_keyphrases(model, text, nr_keywords=3, return_scores=True)
     """
     model.eval()
 
@@ -103,7 +184,7 @@ def predict_keyphrases(
     sentences = [s.text for s in doc.sents if s.text.strip()]
 
     if not sentences:
-        return []
+        return [] if not return_scores else []
 
     tokenized = model.tokenizer(
         sentences,
@@ -119,20 +200,22 @@ def predict_keyphrases(
     with torch.no_grad():
         logits = model(input_ids, attention_mask, sentence_counts)
 
-    all_keyphrases: list[str] = []
-    seen: set[str] = set()
+    ranked_keyphrases = extract_ranked_keyphrases(
+        logits, input_ids, attention_mask, model.tokenizer
+    )
 
-    for i, sentence in enumerate(sentences):
-        sent_keyphrases = _extract_keyphrases_from_logits(
-            logits[i],
-            input_ids[i],
-            attention_mask[i],
-            model.tokenizer,
-        )
+    all_keyphrases: dict[str, float] = {}
+    for sent_keyphrases in ranked_keyphrases:
+        for keyword, score in sent_keyphrases:
+            if keyword not in all_keyphrases or score > all_keyphrases[keyword]:
+                all_keyphrases[keyword] = score
 
-        for kw in sent_keyphrases:
-            if kw not in seen:
-                seen.add(kw)
-                all_keyphrases.append(kw)
+    sorted_keyphrases = sorted(all_keyphrases.items(), key=lambda x: x[1], reverse=True)
 
-    return all_keyphrases
+    if nr_keywords is not None:
+        sorted_keyphrases = sorted_keyphrases[:nr_keywords]
+
+    if return_scores:
+        return [KeyphraseResult(kw, score) for kw, score in sorted_keyphrases]
+    else:
+        return [kw for kw, _ in sorted_keyphrases]

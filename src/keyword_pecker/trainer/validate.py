@@ -24,6 +24,7 @@ import tqdm
 
 from keyword_pecker.data import create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
+from keyword_pecker.models.inference import extract_ranked_keyphrases
 from keyword_pecker.utils import get_logger
 
 logger = get_logger("validate")
@@ -79,100 +80,6 @@ def extract_keyphrases_from_predictions(
         all_keywords.append(keywords)
 
     return all_keywords
-
-
-def extract_ranked_keyphrases(
-    predictions: torch.Tensor,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    tokenizer,
-) -> list[list[tuple[str, float]]]:
-    """Extract keyphrases ranked by model confidence.
-
-    Converts logits to probabilities via sigmoid, then extracts keywords
-    ranked by confidence score (highest first).
-
-    Args:
-        predictions: Model logits of shape (batch_size, max_seq_len).
-        input_ids: Token IDs of shape (batch_size, max_seq_len).
-        attention_mask: Attention mask of shape (batch_size, max_seq_len).
-        tokenizer: HuggingFace tokenizer for decoding tokens.
-
-    Returns:
-        List of keyword lists with confidence scores, one per sentence.
-        Each element is a list of (keyword, confidence) tuples sorted by
-        confidence descending.
-    """
-    batch_size = predictions.shape[0]
-    all_ranked_keywords: list[list[tuple[str, float]]] = []
-
-    # Convert logits to probabilities
-    probs = torch.sigmoid(predictions)
-
-    for i in range(batch_size):
-        seq_len = attention_mask[i].sum().item()
-
-        # Skip BOS (index 0) and EOS (last token before padding)
-        token_ids = input_ids[i, 1 : seq_len - 1]
-        token_probs = probs[i, 1 : seq_len - 1]
-
-        # Group consecutive tokens with high probability into keyphrases
-        # A keyphrase is formed by consecutive tokens where at least one has prob > 0.5
-        keywords_with_scores: list[tuple[str, float]] = []
-
-        current_tokens: list[int] = []
-        current_probs: list[float] = []
-        has_keyword = False
-
-        for j in range(len(token_ids)):
-            token_id = token_ids[j].item()
-            prob = token_probs[j].item()
-
-            if token_id == 0:  # Padding or special token
-                if current_tokens and has_keyword:
-                    decoded = tokenizer.decode(torch.tensor(current_tokens))
-                    keywords = decoded.split("<s>")
-                    keywords = [
-                        re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
-                    ]
-                    max_prob = max(current_probs)
-                    for kw in keywords:
-                        keywords_with_scores.append((kw, max_prob))
-                current_tokens = []
-                current_probs = []
-                has_keyword = False
-                continue
-
-            current_tokens.append(token_id)
-            current_probs.append(prob)
-            if prob > 0.5:
-                has_keyword = True
-
-        # Handle last keyphrase
-        if current_tokens and has_keyword:
-            decoded = tokenizer.decode(torch.tensor(current_tokens))
-            keywords = decoded.split("<s>")
-            keywords = [
-                re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
-            ]
-            max_prob = max(current_probs)
-            for kw in keywords:
-                keywords_with_scores.append((kw, max_prob))
-
-        # Sort by confidence descending
-        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
-
-        # Deduplicate keywords, keeping highest score
-        seen: set[str] = set()
-        deduped: list[tuple[str, float]] = []
-        for kw, score in keywords_with_scores:
-            if kw not in seen:
-                seen.add(kw)
-                deduped.append((kw, score))
-
-        all_ranked_keywords.append(deduped)
-
-    return all_ranked_keywords
 
 
 def compute_keyphrase_metrics(
