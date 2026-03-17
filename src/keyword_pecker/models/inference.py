@@ -30,8 +30,8 @@ def extract_ranked_keyphrases(
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases ranked by model confidence.
 
-    Converts logits to probabilities via sigmoid, then extracts keywords
-    ranked by confidence score (highest first).
+    Converts logits to probabilities via sigmoid, then extracts contiguous
+    spans of tokens where probability > 0.5, treating each span as a keyword.
 
     Args:
         predictions: Model logits of shape (batch_size, max_seq_len).
@@ -59,41 +59,30 @@ def extract_ranked_keyphrases(
 
         current_tokens: list[int] = []
         current_probs: list[float] = []
-        has_keyword = False
 
         for j in range(len(token_ids)):
             token_id = token_ids[j].item()
             prob = token_probs[j].item()
 
-            if token_id == 0:
-                if current_tokens and has_keyword:
-                    decoded = tokenizer.decode(torch.tensor(current_tokens))
-                    keywords = decoded.split("<s>")
-                    keywords = [
-                        re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
-                    ]
-                    max_prob = max(current_probs)
-                    for kw in keywords:
-                        keywords_with_scores.append((kw, max_prob))
-                current_tokens = []
-                current_probs = []
-                has_keyword = False
-                continue
-
-            current_tokens.append(token_id)
-            current_probs.append(prob)
             if prob > 0.5:
-                has_keyword = True
+                current_tokens.append(token_id)
+                current_probs.append(prob)
+            else:
+                if current_tokens:
+                    decoded = tokenizer.decode(torch.tensor(current_tokens))
+                    keyword = re.sub(r" - ", "-", decoded.strip())
+                    if keyword:
+                        max_prob = max(current_probs)
+                        keywords_with_scores.append((keyword, max_prob))
+                    current_tokens = []
+                    current_probs = []
 
-        if current_tokens and has_keyword:
+        if current_tokens:
             decoded = tokenizer.decode(torch.tensor(current_tokens))
-            keywords = decoded.split("<s>")
-            keywords = [
-                re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()
-            ]
-            max_prob = max(current_probs)
-            for kw in keywords:
-                keywords_with_scores.append((kw, max_prob))
+            keyword = re.sub(r" - ", "-", decoded.strip())
+            if keyword:
+                max_prob = max(current_probs)
+                keywords_with_scores.append((keyword, max_prob))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
