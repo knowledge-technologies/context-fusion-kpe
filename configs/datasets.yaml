@@ -29,6 +29,6 @@ datasets:
 
   jptimes:
     description: ""
-    split:
+    splits:
       valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/jptimes/jptimes_valid.json?ref_type=heads&inline=false"
       test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/jptimes/jptimes_test.json?ref_type=heads&inline=false"
