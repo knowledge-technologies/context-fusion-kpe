@@ -14,3 +14,21 @@ datasets:
       train: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_train.json?ref_type=heads&inline=false"
       valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_valid.json?ref_type=heads&inline=false"
       test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/kptimes/kptimes_test.json?ref_type=heads&inline=false"
+
+  inspec:
+    description: ""
+    splits:
+      valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/inspec/inspec_valid.json?ref_type=heads&inline=false"
+      test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/inspec/inspec_test.json?ref_type=heads&inline=false"
+
+  krapivin:
+    description: ""
+    split:
+      valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/krapivin/krapivin_valid.json?ref_type=heads&inline=false"
+      test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/krapivin/krapivin_test.json?ref_type=heads&inline=false"
+
+  jptimes:
+    description: ""
+    split:
+      valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/jptimes/jptimes_valid.json?ref_type=heads&inline=false"
+      test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/jptimes/jptimes_test.json?ref_type=heads&inline=false"
