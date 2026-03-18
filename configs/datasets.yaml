@@ -23,7 +23,7 @@ datasets:
 
   krapivin:
     description: ""
-    split:
+    splits:
       valid: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/krapivin/krapivin_valid.json?ref_type=heads&inline=false"
       test: "https://gitlab.com/matej.martinc/tnt_kid/-/raw/master/data/krapivin/krapivin_test.json?ref_type=heads&inline=false"
 
