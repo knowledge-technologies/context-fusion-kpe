@@ -10,6 +10,10 @@ training:
   log_every: 1000           # log loss every N optimizer steps
   device: cuda              # device to use (cpu or cuda)
   k_values: [5, 10]         # k values for @k metrics
+  early_stopping_patience: 0    # 0 = disabled, N = stop after N epochs without improvement
+  early_stopping_delta: 0.0     # minimum improvement to reset patience counter
+  early_stopping_metric: "val_loss"  # metric to monitor
+  early_stopping_mode: "min"      # "min" for loss, "max" for F1/accuracy
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable

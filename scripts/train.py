@@ -34,7 +34,7 @@ from transformers import get_linear_schedule_with_warmup
 
 from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer import evaluate_model
+from keyword_pecker.trainer import EarlyStopping, evaluate_model
 from keyword_pecker.utils import get_logger, load_config, setup_wandb
 
 load_dotenv()
@@ -97,6 +97,10 @@ def train(
     val_batch_size: int = 100,
     warmup_ratio: float = 0.1,
     k_values: list[int] | None = None,
+    early_stopping_patience: int = 0,
+    early_stopping_delta: float = 0.0,
+    early_stopping_metric: str = "val_loss",
+    early_stopping_mode: str = "min",
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -127,6 +131,10 @@ def train(
         val_batch_size: Batch size for validation forward passes (default: 100).
         warmup_ratio: Fraction of training steps for warmup (default: 0.1).
         k_values: List of k values for @k metrics (default: [5, 10]).
+        early_stopping_patience: Epochs without improvement before stopping (0 = disabled).
+        early_stopping_delta: Minimum improvement to reset patience counter.
+        early_stopping_metric: Metric name to monitor (e.g., "val_loss", "f1@5").
+        early_stopping_mode: "min" for lower-is-better, "max" for higher-is-better.
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -150,6 +158,19 @@ def train(
     )
 
     inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
+
+    early_stopping: EarlyStopping | None = None
+    if early_stopping_patience > 0:
+        early_stopping = EarlyStopping(
+            metric=early_stopping_metric,
+            patience=early_stopping_patience,
+            delta=early_stopping_delta,
+            mode=early_stopping_mode,
+        )
+        logger.info(
+            f"Early stopping enabled: patience={early_stopping_patience}, "
+            f"metric={early_stopping_metric}, delta={early_stopping_delta}, mode={early_stopping_mode}"
+        )
 
     global_step = 0
 
@@ -311,6 +332,14 @@ def train(
                 f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
             )
 
+            if early_stopping is not None:
+                if early_stopping(val_metrics, epoch=epoch + 1):
+                    logger.info(
+                        f"Early stopping triggered at epoch {epoch + 1} "
+                        f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} at epoch {early_stopping.best_epoch})"
+                    )
+                    break
+
         if save_weights and run_dir is not None and epoch < epochs - 1:
             epoch_weights_path = run_dir / f"model_e{epoch + 1}.pt"
             torch.save(model.state_dict(), epoch_weights_path)
@@ -423,6 +452,29 @@ def parse_args() -> argparse.Namespace:
         default=[5, 10],
         help="k values for @k metrics (default: 5 10)",
     )
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="Epochs without improvement before stopping (0 = disabled, default: 0)",
+    )
+    parser.add_argument(
+        "--early-stopping-delta",
+        type=float,
+        default=0.0,
+        help="Minimum improvement to reset patience counter (default: 0.0)",
+    )
+    parser.add_argument(
+        "--early-stopping-metric",
+        default="val_loss",
+        help="Metric to monitor for early stopping (default: val_loss)",
+    )
+    parser.add_argument(
+        "--early-stopping-mode",
+        default="min",
+        choices=["min", "max"],
+        help="'min' for loss-like metrics, 'max' for F1-like metrics (default: min)",
+    )
     return parser.parse_args()
 
 
@@ -464,6 +516,10 @@ def main() -> None:
             "device": args.device,
             "val_batch_size": args.val_batch_size,
             "k_values": args.k_values,
+            "early_stopping_patience": args.early_stopping_patience,
+            "early_stopping_delta": args.early_stopping_delta,
+            "early_stopping_metric": args.early_stopping_metric,
+            "early_stopping_mode": args.early_stopping_mode,
             **model_config,
             "run_test_eval": not args.no_test_eval,
             "save_weights": args.save_weights,
@@ -516,6 +572,10 @@ def main() -> None:
             val_df=val_df,
             val_batch_size=hyperparams["val_batch_size"],
             k_values=hyperparams.get("k_values"),
+            early_stopping_patience=hyperparams.get("early_stopping_patience", 0),
+            early_stopping_delta=hyperparams.get("early_stopping_delta", 0.0),
+            early_stopping_metric=hyperparams.get("early_stopping_metric", "val_loss"),
+            early_stopping_mode=hyperparams.get("early_stopping_mode", "min"),
         )
 
         # Final evaluation on the test split
