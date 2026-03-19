@@ -46,7 +46,7 @@ def parse_args() -> argparse.Namespace:
         help="Dataset split to evaluate (default: val)",
     )
     parser.add_argument(
-        "--from_config",
+        "--from-config",
         action="store_true",
         help="Load evaluation params from configs/training.yaml",
     )
@@ -62,13 +62,13 @@ def parse_args() -> argparse.Namespace:
         help="Device for inference: cpu, cuda, mps (default: cpu)",
     )
     parser.add_argument(
-        "--pos_weight",
+        "--pos-weight",
         type=float,
         default=5.0,
         help="Positive class weight for BCEWithLogitsLoss (default: 5.0)",
     )
     parser.add_argument(
-        "--k_values",
+        "--k-values",
         type=int,
         nargs="+",
         default=[5, 10],
