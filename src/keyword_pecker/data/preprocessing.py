@@ -332,7 +332,10 @@ def write_parquet(
     lf = pl.LazyFrame(data_rows, schema=schema or SENTENCE_SCHEMA)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     lf.sink_parquet(output_path, compression="snappy")
-    return len(lf)
+
+    n_rows = lf.select(pl.len()).collect().item()
+
+    return n_rows
 
 
 # ============================================================================
