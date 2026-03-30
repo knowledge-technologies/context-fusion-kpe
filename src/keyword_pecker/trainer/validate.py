@@ -120,7 +120,7 @@ def compute_keyphrase_metrics(
 def compute_metrics_at_k(
     gold_keywords: list[set[str]],
     pred_keywords_ranked: list[list[tuple[str, float]]],
-    k_values: list[int],
+    k_values: list[int | str],
 ) -> dict[str, float]:
     """Compute precision@k, recall@k, and F1@k for each k value.
 
@@ -133,17 +133,20 @@ def compute_metrics_at_k(
             one per document. Each list contains (keyword, score) tuples sorted
             by confidence descending.
         k_values: List of k values to compute metrics for (e.g., [5, 10]).
+            Use the string "N" to compute @N metrics where k equals the number
+            of gold keywords for each document.
 
     Returns:
         dict with keys like precision@5, recall@5, f1@5, etc.
+        For "N" sentinel, keys are precision@N, recall@N, f1@N.
     """
     metrics: dict[str, float] = {}
 
-    for k in k_values:
+    for k_spec in k_values:
         tp = fp = fn = 0
 
         for gold, pred_ranked in zip(gold_keywords, pred_keywords_ranked):
-            # Take top-k predictions
+            k = len(gold) if k_spec == "N" else k_spec
             top_k = set(kw for kw, _ in pred_ranked[:k])
 
             tp += len(gold & top_k)
@@ -154,9 +157,10 @@ def compute_metrics_at_k(
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
 
-        metrics[f"precision@{k}"] = precision
-        metrics[f"recall@{k}"] = recall
-        metrics[f"f1@{k}"] = f1
+        key_suffix = "N" if k_spec == "N" else str(k_spec)
+        metrics[f"precision@{key_suffix}"] = precision
+        metrics[f"recall@{key_suffix}"] = recall
+        metrics[f"f1@{key_suffix}"] = f1
 
     return metrics
 
@@ -169,7 +173,7 @@ def evaluate_model(
     pos_weight: float,
     device: torch.device,
     split: str = "val",
-    k_values: list[int] | None = None,
+    k_values: list[int | str] | None = None,
     metrics_filename: Path | None = None,
     wandb: types.ModuleType | None = None,
     global_step: int = 0,
@@ -212,7 +216,7 @@ def evaluate_model(
               pred_keywords (keyword lists are sorted).
     """
     if k_values is None:
-        k_values = [5, 10]
+        k_values = [5, 10, "N"]
 
     model.eval()
 
