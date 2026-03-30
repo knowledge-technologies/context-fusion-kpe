@@ -96,7 +96,7 @@ def train(
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
     warmup_ratio: float = 0.1,
-    k_values: list[int] | None = None,
+    k_values: list[int | str] | None = None,
     early_stopping_patience: int = 0,
     early_stopping_delta: float = 0.0,
     early_stopping_metric: str = "val_loss",
@@ -447,10 +447,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--k-values",
-        type=int,
         nargs="+",
-        default=[5, 10],
-        help="k values for @k metrics (default: 5 10)",
+        default=[5, 10, "N"],
+        help="k values for @k metrics, use N for doc-length (default: 5 10 N)",
     )
     parser.add_argument(
         "--early-stopping-patience",

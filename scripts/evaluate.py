@@ -69,10 +69,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--k-values",
-        type=int,
         nargs="+",
-        default=[5, 10],
-        help="k values for @k metrics (default: 5 10)",
+        default=[5, 10, "N"],
+        help="k values for @k metrics, use N for doc-length (default: 5 10 N)",
     )
     parser.add_argument(
         "--output",
