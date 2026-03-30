@@ -57,6 +57,7 @@ class KeyphraseDataset(Dataset):
             "doc_row": row["doc_row"],
             "token_ids": row["token_ids"],
             "keyword_mask": row["keyword_mask"],
+            "keywords": row["keywords"],
         }
 
 
@@ -200,6 +201,9 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
             - attention_mask: Padding mask tensor (batch_size, max_len)
             - target: Padded keyword mask tensor (batch_size, max_len)
             - sentence_counts: List[int] of sentences per document in this batch
+            - doc_ids: List[str] of document IDs
+            - doc_rows: List[int] of document row indices
+            - keywords: List[List[str]] of gold keywords per sample
     """
     num_rows = len(batch)
 
@@ -239,11 +243,19 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
 
         sentence_counts.append(current_count)
 
+    # Extract document identifiers and keywords for each sample
+    doc_ids = [sample["doc_id"] for sample in batch]
+    doc_rows = [sample["doc_row"] for sample in batch]
+    keywords = [sample["keywords"] for sample in batch]
+
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
         "target": target,
         "sentence_counts": sentence_counts,
+        "doc_ids": doc_ids,
+        "doc_rows": doc_rows,
+        "keywords": keywords,
     }
 
 

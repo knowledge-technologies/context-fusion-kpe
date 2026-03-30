@@ -237,6 +237,9 @@ def evaluate_model(
     # Collect ranked predictions per sentence (with confidence scores)
     all_ranked_predictions: list[list[tuple[str, float]]] = []
 
+    # Track gold keywords per document (doc_id, doc_row) -> keywords
+    doc_to_gold: dict[tuple[str, int], list[str]] = {}
+
     num_batches = len(val_loader)
 
     with torch.no_grad():
@@ -247,6 +250,9 @@ def evaluate_model(
             attention_mask = batch["attention_mask"].to(device)
             target = batch["target"].to(device)
             sentence_counts = batch["sentence_counts"]
+            doc_ids = batch["doc_ids"]
+            doc_rows = batch["doc_rows"]
+            keywords = batch["keywords"]
 
             # Forward pass
             logits = model(input_ids, attention_mask, sentence_counts)
@@ -268,6 +274,14 @@ def evaluate_model(
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 
+            # Track gold keywords per document
+            doc_to_gold.update(
+                {
+                    (doc_id, doc_row): kw_list
+                    for doc_id, doc_row, kw_list in zip(doc_ids, doc_rows, keywords)
+                }
+            )
+
             # Free batch tensors to reduce memory fragmentation
             del input_ids, attention_mask, target, logits, loss, batch_ranked_keywords
             if device.type == "cuda":
@@ -276,47 +290,18 @@ def evaluate_model(
     # Compute mean loss
     val_loss = total_loss / total_tokens if total_tokens > 0 else 0.0
 
-    # Now we need to aggregate predictions and gold labels at document level
+    # Aggregate predictions to document level
+    doc_to_pred_ranked: dict[tuple[str, int], list[tuple[str, float]]] = {}
+
     # Get document identifiers for each sentence
     doc_ids = val_df["doc_id"].to_list()
     doc_rows = val_df["doc_row"].to_list()
 
-    # Extract gold keywords from each sentence
-    gold_per_sentence: list[list[str]] = []
-    token_ids_list = val_df["token_ids"].to_list()
-    keyword_masks = val_df["keyword_mask"].to_list()
-
-    for token_ids, kw_mask in zip(token_ids_list, keyword_masks):
-        # Create tensors for gold extraction
-        seq_len = len(token_ids)
-        gold_input_ids = torch.tensor(token_ids, dtype=torch.long).unsqueeze(0)
-        gold_mask = torch.tensor(kw_mask, dtype=torch.float).unsqueeze(0)
-        gold_attn = torch.ones(1, seq_len, dtype=torch.long)
-
-        # Extract gold keywords
-        gold_kws = extract_keyphrases_from_predictions(
-            gold_mask,
-            gold_input_ids,
-            gold_attn,
-            model.tokenizer,
-        )
-        gold_per_sentence.append(gold_kws[0])
-
-    # Free intermediate data no longer needed
-    del token_ids_list, keyword_masks
-
-    # Aggregate to document level
-    doc_to_gold: dict[tuple[str, int], set[str]] = {}
-    doc_to_pred_ranked: dict[tuple[str, int], list[tuple[str, float]]] = {}
-
     for i, (doc_id, doc_row) in enumerate(zip(doc_ids, doc_rows)):
         key = (doc_id, doc_row)
 
-        if key not in doc_to_gold:
-            doc_to_gold[key] = set()
+        if key not in doc_to_pred_ranked:
             doc_to_pred_ranked[key] = []
-
-        doc_to_gold[key].update(gold_per_sentence[i])
 
         if i < len(all_ranked_predictions):
             doc_to_pred_ranked[key].extend(all_ranked_predictions[i])
@@ -334,7 +319,7 @@ def evaluate_model(
 
     # Convert to lists for metric computation (preserve order)
     doc_keys = list(doc_to_gold.keys())
-    gold_sets = [doc_to_gold[k] for k in doc_keys]
+    gold_sets = [set(doc_to_gold[k]) for k in doc_keys]
     pred_ranked = [doc_to_pred_ranked[k] for k in doc_keys]
 
     # Capture random samples for qualitative analysis
@@ -355,7 +340,6 @@ def evaluate_model(
 
     # Free aggregation intermediates
     del (
-        gold_per_sentence,
         all_ranked_predictions,
         doc_ids,
         doc_rows,
