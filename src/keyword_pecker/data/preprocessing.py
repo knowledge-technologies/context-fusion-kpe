@@ -101,7 +101,7 @@ def segment_sentences(
 def build_keyword_regex(
     keywords: list[str],
     stemmer: PorterStemmer,
-) -> tuple[regex.Pattern, list[str]]:
+) -> regex.Pattern:
     """Build regex pattern from keywords with word boundaries.
 
     Creates a compiled regex that matches keywords as complete words,
@@ -112,30 +112,25 @@ def build_keyword_regex(
         stemmer: Porter stemmer instance.
 
     Returns:
-        Tuple of (compiled_regex_pattern, stemmed_keywords).
+        Compiled regex pattern for matching keywords.
 
     Example:
         >>> stemmer = PorterStemmer()
-        >>> pattern, stemmed = build_keyword_regex(["machine learning"], stemmer)
+        >>> pattern = build_keyword_regex(["machine learning"], stemmer)
         >>> pattern.pattern
         '(?i)\\\\bmachine\\\\s+learning\\\\b'
     """
     regex_parts = []
-    stemmed_kws = []
 
     for kw in keywords:
         word_re_parts = []
-        stemmed_parts = []
         for w in kw.split():
-            stemmed = stemmer.stem(w)
-            stemmed_parts.append(stemmed)
             word_re_parts.append(rf"\b{regex.escape(w)}\b")
-        stemmed_kws.append(" ".join(stemmed_parts))
         regex_parts.append(r"\s+".join(word_re_parts))
 
     # Sort by length (longest first) to prioritize longer matches
     combined_pattern = "|".join(sorted(regex_parts, key=len, reverse=True))
-    return regex.compile(combined_pattern, flags=regex.IGNORECASE), stemmed_kws
+    return regex.compile(combined_pattern, flags=regex.IGNORECASE)
 
 
 def resolve_keyword_spans(
@@ -143,7 +138,6 @@ def resolve_keyword_spans(
     offsets: np.ndarray,
     num_total_tokens: int,
     regex_pattern: regex.Pattern,
-    stemmed_kws: list[str],
 ) -> tuple[list[str], list[tuple[int, int]]]:
     """Resolve keyword spans in sentence to token ranges.
 
@@ -158,7 +152,6 @@ def resolve_keyword_spans(
         offsets: Token offset mapping from tokenizer (shape: [seq_len, 2]).
         num_total_tokens: Number of tokens (excluding padding).
         regex_pattern: Compiled regex pattern for matching keywords.
-        stemmed_kws: List of stemmed keywords (for reference).
 
     Returns:
         Tuple of (matched_keywords, token_ranges):
@@ -428,7 +421,7 @@ def process_document(
     processed = []
 
     # Build keyword regex pattern
-    regex_pattern, stemmed_kws = build_keyword_regex(keywords, stemmer)
+    regex_pattern = build_keyword_regex(keywords, stemmer)
 
     # Tokenize all sentences at once
     tokenized = tokenize_sentences(sentences, tokenizer)
@@ -443,7 +436,6 @@ def process_document(
             offset_mapping[s_idx].numpy(),
             sent_tok_len,
             regex_pattern,
-            stemmed_kws,
         )
 
         # Create keyword mask
