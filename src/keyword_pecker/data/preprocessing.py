@@ -102,9 +102,9 @@ def build_keyword_regex(
     keywords: list[str],
     stemmer: PorterStemmer,
 ) -> tuple[regex.Pattern, list[str]]:
-    """Build stemmed regex pattern from keywords.
+    """Build regex pattern from keywords with word boundaries.
 
-    Creates a compiled regex that matches stemmed versions of keywords,
+    Creates a compiled regex that matches keywords as complete words,
     sorted by length (longest first) to prioritize longer matches.
 
     Args:
@@ -118,7 +118,7 @@ def build_keyword_regex(
         >>> stemmer = PorterStemmer()
         >>> pattern, stemmed = build_keyword_regex(["machine learning"], stemmer)
         >>> pattern.pattern
-        'machin\\\\w*\\\\s+learn\\\\w*'
+        '(?i)\\\\bmachine\\\\s+learning\\\\b'
     """
     regex_parts = []
     stemmed_kws = []
@@ -129,7 +129,7 @@ def build_keyword_regex(
         for w in kw.split():
             stemmed = stemmer.stem(w)
             stemmed_parts.append(stemmed)
-            word_re_parts.append(rf"{regex.escape(stemmed)}\w*")
+            word_re_parts.append(rf"\b{regex.escape(w)}\b")
         stemmed_kws.append(" ".join(stemmed_parts))
         regex_parts.append(r"\s+".join(word_re_parts))
 
