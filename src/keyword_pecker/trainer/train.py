@@ -108,6 +108,12 @@ def train(
 
     inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
 
+    # Two-level batching strategy:
+    # - Inner batch: forward/backward pass on `inner_batch_size` sentences
+    # - Outer batch: gradient accumulation unit of `outer_batch_size` sentences
+    # - Forward/backward pass executed per inner batch (gradients accumulate)
+    # - optimizer.step() (weight update) executed once per outer batch
+
     early_stopping: EarlyStopping | None = None
     if early_stopping_patience > 0:
         early_stopping = EarlyStopping(
@@ -147,7 +153,7 @@ def train(
             )
 
             model.train()
-            optimizer.zero_grad()
+            optimizer.zero_grad()  # Clear gradients at start of each epoch before accumulation begins
 
             outer_step = 0
             inner_count = 0
@@ -178,6 +184,9 @@ def train(
 
                 inner_count += 1
 
+                # Complete outer batch: gradients accumulated for `inner_per_outer` inner batches
+                # Step optimizer (update weights) and scheduler, then zero gradients
+                # Note: zero_grad() called AFTER step() to prepare for next accumulation cycle
                 if inner_count == inner_per_outer:
                     optimizer.step()
                     scheduler.step()
@@ -251,6 +260,9 @@ def train(
                             metrics_file.close()
                             return
 
+            # Remainder handling: process leftover samples that don't fill a complete outer batch
+            # This ensures we don't lose gradients on the final partial batch
+            # Note: outer_step not incremented since this is a partial batch
             if inner_count > 0:
                 optimizer.step()
                 scheduler.step()
