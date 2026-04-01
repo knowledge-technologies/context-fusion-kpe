@@ -14,6 +14,7 @@ training:
   early_stopping_delta: 0.01         # minimum improvement to reset patience counter
   early_stopping_metric: "f1@N"  # metric to monitor
   early_stopping_mode: "max"         # "min" for loss, "max" for F1/accuracy
+  early_stopping_check_every: 500    # check every 500 steps
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable
