@@ -46,6 +46,11 @@ SENTENCE_SCHEMA = {
     "keyword_mask": pl.List(pl.Int32),
 }
 
+KEYWORD_MASK_LABELS = {
+    "binary": {0: "not_keyword", 1: "keyword"},
+    "IOB": {0: "Outside", 1: "Beginning", 2: "Inside"},
+}
+
 
 # ============================================================================
 # Sentence Segmentation
@@ -262,17 +267,22 @@ def tokenize_sentences(
 def create_keyword_mask(
     keyword_token_ranges: list[tuple[int, int]],
     sent_tok_len: int,
+    scheme: str = "IOB",
     device: str = "cpu",
 ) -> torch.Tensor:
-    """Create binary mask for tokens that are part of keywords.
+    """Create keyword mask for tokens using binary or IOB labeling scheme.
 
     Args:
-        keyword_token_ranges: List of (start, end) token index pairs.
+        keyword_token_ranges: List of [start, end) token index pairs (`end` is not included).
         sent_tok_len: Total number of tokens in sentence.
+        scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
+            "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device for computation.
 
     Returns:
-        Binary tensor of shape (sent_tok_len,) with 1 for keyword tokens.
+        Tensor of shape (sent_tok_len,) with labels:
+        - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside)
+        - Binary scheme: 0 (not keyword), 1 (keyword)
 
     Raises:
         ValueError: If overlapping keywords detected (should not happen
@@ -284,17 +294,52 @@ def create_keyword_mask(
     tok_start, tok_end = zip(*keyword_token_ranges)
     tok_start = torch.tensor(tok_start)
     tok_end = torch.tensor(tok_end)
-    arange = torch.arange(sent_tok_len).tile(len(keyword_token_ranges), 1)
-    targets = torch.ones_like(arange, device=device)
-    targets[arange < tok_start.view(-1, 1)] = 0
-    targets[arange >= tok_end.view(-1, 1)] = 0
-    targets = targets.sum(dim=0)
 
-    # Check for overlapping keywords (should not happen with skip strategy)
-    if targets.max() > 1:
-        raise ValueError(
-            f"Overlapping keywords detected: max overlap = {targets.max()}"
-        )
+    # create array of indices (one sequence for each keyphrase)
+    arange = torch.arange(sent_tok_len).tile(len(keyword_token_ranges), 1)
+
+    def _binary_labels(idxs, starts, ends):
+
+        # pre-allocate all 1's
+        targets = torch.ones_like(idxs, device=device)
+
+        # no zero-out all tokens before and after keyword
+        # tokens for each keyword
+        targets[idxs < starts.view(-1, 1)] = 0
+        targets[idxs >= ends.view(-1, 1)] = 0
+
+        # sum across dim 0, to obtain a
+        # single array of 0's and 1's
+        targets = targets.sum(dim=0)
+
+        return targets
+
+    def _iob_labels(idxs, starts, ends):
+
+        targets = torch.zeros_like(idxs, device=device)
+
+        begin_phrase = idxs == starts.view(-1, 1)
+        targets[begin_phrase] = 1
+
+        within_phrase = (idxs > starts.view(-1, 1)) & (idxs < ends.view(-1, 1))
+        targets[within_phrase] = 2
+
+        return targets.sum(dim=0)
+
+    factory = _iob_labels if scheme == "IOB" else _binary_labels
+
+    targets = factory(idxs=arange, starts=tok_start, ends=tok_end)
+
+    if scheme == "binary":
+        if targets.max() > 1:
+            raise ValueError(
+                f"Overlapping keywords detected: max overlap = {targets.max()}"
+            )
+    else:
+        if targets.max() > 2:
+            raise ValueError(
+                f"Overlapping keywords detected: max overlap = {targets.max()}"
+            )
 
     return targets
 
@@ -400,6 +445,7 @@ def process_document(
     keywords: list[str],
     tokenizer: AutoTokenizer,
     stemmer: PorterStemmer,
+    scheme: str = "IOB",
     device: str = "cpu",
 ) -> list[dict]:
     """Process a single document through the full pipeline.
@@ -413,6 +459,8 @@ def process_document(
         keywords: List of document keywords.
         tokenizer: HuggingFace tokenizer.
         stemmer: Porter stemmer.
+        scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
+            "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device.
 
     Returns:
@@ -439,7 +487,7 @@ def process_document(
         )
 
         # Create keyword mask
-        keyword_mask = create_keyword_mask(tok_ranges, sent_tok_len, device)
+        keyword_mask = create_keyword_mask(tok_ranges, sent_tok_len, scheme, device)
 
         processed.append(
             {
@@ -467,6 +515,7 @@ def process_dataset(
     spacy_n_process: int,
     tokenizer: AutoTokenizer,
     stemmer: PorterStemmer,
+    scheme: str = "IOB",
     limit: int | None = None,
     device: str = "cpu",
     show_progress: bool = True,
@@ -479,8 +528,12 @@ def process_dataset(
     Args:
         filepath: Path to JSON file.
         nlp: Loaded spaCy model.
+        spacy_batch_size: Batch size for spaCy sentence segmentation.
+        spacy_n_process: Number of processes for spaCy parallel processing.
         tokenizer: HuggingFace tokenizer.
         stemmer: Porter stemmer.
+        scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
+            "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         limit: Optional row limit for testing.
         device: Torch device.
         show_progress: Whether to show progress bar.
@@ -560,6 +613,7 @@ def process_dataset(
             keywords=keywords,
             tokenizer=tokenizer,
             stemmer=stemmer,
+            scheme=scheme,
             device=device,
         )
         all_processed.extend(doc_processed)
