@@ -20,332 +20,19 @@ Usage:
 
 import argparse
 import json
-import math
-import os
-import types
-from pathlib import Path
 
 import polars as pl
 import torch
-import tqdm
 from dotenv import load_dotenv
 
-from transformers import get_linear_schedule_with_warmup
-
-from keyword_pecker.data import create_keyphrase_dataloader, get_derived_path
+from keyword_pecker.data import get_derived_path
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer import EarlyStopping, evaluate_model
-from keyword_pecker.utils import get_logger, load_config, setup_wandb
+from keyword_pecker.trainer import evaluate_model, train
+from keyword_pecker.utils import get_logger, init_run_dir, load_config, setup_wandb
 
 load_dotenv()
 
 logger = get_logger("train")
-
-
-# ---------------------------------------------------------------------------
-# Local run directory helpers
-# ---------------------------------------------------------------------------
-
-
-def get_runs_root() -> Path:
-    """Return the root directory for all experiment runs.
-
-    Reads ``EXPERIMENT_RUNS_FOLDER`` from the environment (set in ``.env``).
-    Falls back to ``$DATASET_FOLDER/runs`` if not defined.
-    """
-    runs_env = os.environ.get("EXPERIMENT_RUNS_FOLDER")
-    if runs_env:
-        return Path(runs_env)
-
-    dataset_env = os.environ.get("DATASET_FOLDER")
-    if dataset_env:
-        return Path(dataset_env) / "runs"
-
-    # Last resort: write next to the project root
-    return Path(__file__).parent.parent / "runs"
-
-
-def init_run_dir(run_name: str) -> Path:
-    """Create and return the directory for a single run."""
-    run_dir = get_runs_root() / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
-    return run_dir
-
-
-# ---------------------------------------------------------------------------
-# Training loop
-# ---------------------------------------------------------------------------
-
-
-def train(
-    model: KeyphraseModel,
-    train_df: pl.DataFrame,
-    *,
-    epochs: int,
-    outer_batch_size: int,
-    inner_batch_size: int,
-    base_lr: float,
-    head_lr: float,
-    pos_weight: float,
-    log_every: int,
-    device: torch.device,
-    metrics_filename: Path,
-    wandb: types.ModuleType | None,
-    run_dir: Path | None = None,
-    save_weights: bool = False,
-    val_df: pl.DataFrame | None = None,
-    val_batch_size: int = 100,
-    warmup_ratio: float = 0.1,
-    k_values: list[int | str] | None = None,
-    early_stopping_patience: int = 0,
-    early_stopping_delta: float = 0.0,
-    early_stopping_metric: str = "val_loss",
-    early_stopping_mode: str = "min",
-) -> None:
-    """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
-
-    Replicates the two-level batching semantics of the original training loop
-    (tmp/train-model.py lines 209-305):
-      - Gradients accumulate across inner batches within each outer chunk
-      - optimizer.step() is called once per outer chunk (every outer_batch_size sentences)
-      - The dataloader is re-created each epoch to re-shuffle at document level
-        (equivalent to the legacy train_df.sample(frac=1.0))
-
-    Args:
-        model: KeyphraseModel to train (already moved to device).
-        train_df: Polars DataFrame with columns [doc_id, doc_row, sent_num,
-            token_ids, keyword_mask], sorted by (doc_id, doc_row, sent_num).
-        epochs: Number of full passes over the training data.
-        outer_batch_size: Sentences per gradient accumulation unit.
-        inner_batch_size: Sentences per forward pass.
-        base_lr: Learning rate for base encoder parameters.
-        head_lr: Learning rate for refinement head parameters.
-        pos_weight: Positive class weight for BCEWithLogitsLoss.
-        log_every: Print loss every this many optimizer steps.
-        device: Device to run on.
-        metrics_filename: Path to the JSONL file where metrics are appended.
-        wandb: The wandb module if W&B tracking is active, or ``None``.
-        run_dir: Directory to save epoch checkpoint weights (model_e1.pt, model_e2.pt, ...).
-        save_weights: If True, save model weights after each epoch (except the last).
-        val_df: Optional Polars DataFrame for validation (same schema as train_df).
-        val_batch_size: Batch size for validation forward passes (default: 100).
-        warmup_ratio: Fraction of training steps for warmup (default: 0.1).
-        k_values: List of k values for @k metrics (default: [5, 10]).
-        early_stopping_patience: Epochs without improvement before stopping (0 = disabled).
-        early_stopping_delta: Minimum improvement to reset patience counter.
-        early_stopping_metric: Metric name to monitor (e.g., "val_loss", "f1@5").
-        early_stopping_mode: "min" for lower-is-better, "max" for higher-is-better.
-    """
-    optimizer = torch.optim.AdamW(
-        model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
-    )
-
-    total_steps = math.ceil(len(train_df) / outer_batch_size) * epochs
-    warmup_steps = int(total_steps * warmup_ratio)
-
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=total_steps,
-    )
-    logger.info(
-        f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
-    )
-
-    loss_fn = torch.nn.BCEWithLogitsLoss(
-        reduction="none",
-        pos_weight=torch.tensor([[pos_weight]], device=device),
-    )
-
-    inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
-
-    early_stopping: EarlyStopping | None = None
-    if early_stopping_patience > 0:
-        early_stopping = EarlyStopping(
-            metric=early_stopping_metric,
-            patience=early_stopping_patience,
-            delta=early_stopping_delta,
-            mode=early_stopping_mode,
-        )
-        logger.info(
-            f"Early stopping enabled: patience={early_stopping_patience}, "
-            f"metric={early_stopping_metric}, delta={early_stopping_delta}, mode={early_stopping_mode}"
-        )
-
-    global_step = 0
-
-    metrics_file = metrics_filename.open("a")
-
-    for epoch in range(epochs):
-        logger.info(f"Epoch {epoch + 1}/{epochs}")
-        if wandb:
-            wandb.log({"epoch": epoch + 1}, step=global_step)
-
-        # Re-create each epoch to re-shuffle documents
-        train_loader = create_keyphrase_dataloader(
-            df=train_df,
-            outer_batch_size=outer_batch_size,
-            inner_batch_size=inner_batch_size,
-            shuffle=True,
-            drop_last=False,
-            num_workers=0,
-        )
-
-        model.train()
-        optimizer.zero_grad()
-
-        outer_step = 0
-        inner_count = 0
-        last_loss: float | None = None
-        epoch_loss_sum = 0.0
-        epoch_loss_count = 0
-
-        total_outer = math.ceil(len(train_loader) / inner_per_outer)
-        progress = tqdm.trange(total_outer, desc="steps")
-
-        for batch in train_loader:
-            input_ids = batch["input_ids"].to(device)
-            attention_mask = batch["attention_mask"].to(device)
-            target = batch["target"].to(device)
-            sentence_counts = batch["sentence_counts"]
-
-            logits = model(input_ids, attention_mask, sentence_counts)
-
-            # Masked mean loss: average only over non-padding token positions
-            loss = loss_fn(logits, target) * attention_mask
-            loss = loss.sum() / attention_mask.sum()
-            loss.backward()
-
-            last_loss = loss.detach().cpu().item()
-
-            # Eagerly free activations
-            del logits, loss, input_ids, attention_mask, target
-            if device.type == "cuda":
-                torch.cuda.empty_cache()
-
-            inner_count += 1
-
-            if inner_count == inner_per_outer:
-                optimizer.step()
-                scheduler.step()
-                optimizer.zero_grad()
-
-                if last_loss is not None:
-                    epoch_loss_sum += last_loss
-                    epoch_loss_count += 1
-
-                    if outer_step % log_every == 0:
-                        logger.info(f"step {global_step} loss: {last_loss:.6f}")
-
-                        record = {
-                            "epoch": epoch + 1,
-                            "outer_step": outer_step,
-                            "global_step": global_step,
-                            "train_loss": last_loss,
-                            "learning_rate": scheduler.get_last_lr()[0],
-                        }
-                        metrics_file.write(json.dumps(record) + "\n")
-                        metrics_file.flush()
-
-                        if wandb:
-                            wandb.log(
-                                {
-                                    "train/loss": last_loss,
-                                    "train/learning_rate": scheduler.get_last_lr()[0],
-                                },
-                                step=global_step,
-                            )
-
-                outer_step += 1
-                global_step += 1
-                inner_count = 0
-                progress.update(1)
-
-        # Step on any remaining accumulated gradients (last incomplete outer chunk)
-        if inner_count > 0:
-            optimizer.step()
-            scheduler.step()
-            optimizer.zero_grad()
-
-            if last_loss is not None:
-                epoch_loss_sum += last_loss
-                epoch_loss_count += 1
-
-                if outer_step % log_every == 0:
-                    logger.info(f"step {global_step} loss: {last_loss:.6f}")
-
-                    record = {
-                        "epoch": epoch + 1,
-                        "outer_step": outer_step,
-                        "global_step": global_step,
-                        "train_loss": last_loss,
-                        "learning_rate": scheduler.get_last_lr()[0],
-                    }
-                    metrics_file.write(json.dumps(record) + "\n")
-                    metrics_file.flush()
-
-                    if wandb:
-                        wandb.log(
-                            {
-                                "train/loss": last_loss,
-                                "train/learning_rate": scheduler.get_last_lr()[0],
-                            },
-                            step=global_step,
-                        )
-
-                global_step += 1
-                progress.update(1)
-
-        progress.close()
-
-        # Epoch-level summary
-        if epoch_loss_count > 0:
-            mean_loss = epoch_loss_sum / epoch_loss_count
-            logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
-
-            metrics_file.write(
-                json.dumps({"epoch": epoch + 1, "epoch_mean_loss": mean_loss}) + "\n"
-            )
-            metrics_file.flush()
-
-            if wandb:
-                wandb.log({"train/epoch_mean_loss": mean_loss}, step=global_step)
-
-        # Run validation at end of each epoch
-        if val_df is not None:
-            val_metrics = evaluate_model(
-                model,
-                val_df,
-                batch_size=val_batch_size,
-                pos_weight=pos_weight,
-                device=device,
-                split="val",
-                k_values=k_values,
-                metrics_filename=metrics_filename,
-                wandb=wandb,
-                global_step=global_step,
-                epoch=epoch + 1,
-            )
-            k_val = k_values[0] if k_values else 5
-            logger.info(
-                f"Epoch {epoch + 1} val loss: {val_metrics['val_loss']:.6f}, "
-                f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
-            )
-
-            if early_stopping is not None:
-                if early_stopping(val_metrics, epoch=epoch + 1):
-                    logger.info(
-                        f"Early stopping triggered at epoch {epoch + 1} "
-                        f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} at epoch {early_stopping.best_epoch})"
-                    )
-                    break
-
-        if save_weights and run_dir is not None and epoch < epochs - 1:
-            epoch_weights_path = run_dir / f"model_e{epoch + 1}.pt"
-            torch.save(model.state_dict(), epoch_weights_path)
-            logger.info(f"Epoch {epoch + 1} weights saved to {epoch_weights_path}")
-
-    metrics_file.close()
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +161,12 @@ def parse_args() -> argparse.Namespace:
         choices=["min", "max"],
         help="'min' for loss-like metrics, 'max' for F1-like metrics (default: min)",
     )
+    parser.add_argument(
+        "--early-stopping-check-every",
+        type=int,
+        default=0,
+        help="Run validation every N optimizer steps for early stopping (0 = epoch-only, default: 0)",
+    )
     return parser.parse_args()
 
 
@@ -519,6 +212,7 @@ def main() -> None:
             "early_stopping_delta": args.early_stopping_delta,
             "early_stopping_metric": args.early_stopping_metric,
             "early_stopping_mode": args.early_stopping_mode,
+            "early_stopping_check_every": args.early_stopping_check_every,
             **model_config,
             "run_test_eval": not args.no_test_eval,
             "save_weights": args.save_weights,
@@ -575,6 +269,7 @@ def main() -> None:
             early_stopping_delta=hyperparams.get("early_stopping_delta", 0.0),
             early_stopping_metric=hyperparams.get("early_stopping_metric", "val_loss"),
             early_stopping_mode=hyperparams.get("early_stopping_mode", "min"),
+            early_stopping_check_every=hyperparams.get("early_stopping_check_every", 0),
         )
 
         # Final evaluation on the test split
