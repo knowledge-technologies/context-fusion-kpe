@@ -134,6 +134,7 @@ def train(
         )
 
     global_step = 0
+    best_model_state: dict | None = None
 
     metrics_file = metrics_filename.open("a")
 
@@ -250,12 +251,28 @@ def train(
                             f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
                         )
 
-                        if early_stopping(val_metrics, step=global_step):
+                        should_stop = early_stopping(val_metrics, step=global_step)
+
+                        if early_stopping.best_step == global_step:
+                            best_model_state = {
+                                k: v.cpu() for k, v in model.state_dict().items()
+                            }
+
+                        if should_stop:
                             logger.info(
                                 f"Early stopping triggered at step {global_step} "
                                 f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
                                 f"at step {early_stopping.best_step})"
                             )
+                            if (
+                                save_weights
+                                and run_dir is not None
+                                and best_model_state is not None
+                            ):
+                                torch.save(best_model_state, run_dir / "model.pt")
+                                logger.info(
+                                    f"Best model saved to {run_dir / 'model.pt'}"
+                                )
                             progress.close()
                             metrics_file.close()
                             return
@@ -333,18 +350,31 @@ def train(
                 )
 
                 if early_stopping is not None and early_stopping_check_every == 0:
-                    if early_stopping(val_metrics, step=global_step):
+                    should_stop = early_stopping(val_metrics, step=global_step)
+
+                    if early_stopping.best_step == global_step:
+                        best_model_state = {
+                            k: v.cpu() for k, v in model.state_dict().items()
+                        }
+
+                    if should_stop:
                         logger.info(
                             f"Early stopping triggered at epoch {epoch + 1} "
                             f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
                             f"at step {early_stopping.best_step})"
                         )
+                        if (
+                            save_weights
+                            and run_dir is not None
+                            and best_model_state is not None
+                        ):
+                            torch.save(best_model_state, run_dir / "model.pt")
+                            logger.info(f"Best model saved to {run_dir / 'model.pt'}")
                         break
 
-            if save_weights and run_dir is not None and epoch < epochs - 1:
-                epoch_weights_path = run_dir / f"model_e{epoch + 1}.pt"
-                torch.save(model.state_dict(), epoch_weights_path)
-                logger.info(f"Epoch {epoch + 1} weights saved to {epoch_weights_path}")
+        if save_weights and run_dir is not None:
+            torch.save(model.state_dict(), run_dir / "model.pt")
+            logger.info(f"Final model saved to {run_dir / 'model.pt'}")
 
     finally:
         metrics_file.close()

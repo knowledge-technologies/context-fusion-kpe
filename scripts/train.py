@@ -296,12 +296,6 @@ def main() -> None:
                 f"F1@{k_val}: {test_metrics[f'f1@{k_val}']:.4f}"
             )
 
-        # Save model weights into the run directory if requested
-        if hyperparams["save_weights"]:
-            weights_path = run_dir / "model.pt"
-            torch.save(model.state_dict(), weights_path)
-            logger.info(f"Model weights saved to {weights_path}")
-
     finally:
         if wandb:
             wandb.finish()
