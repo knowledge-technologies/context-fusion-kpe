@@ -9,11 +9,11 @@ training:
   warmup_ratio: 0.1                  # fraction of training steps for warmup
   log_every: 100                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
-  k_values: [5, 10, "N"]              # k values for @k metrics (N = doc-length)
-  early_stopping_patience: 3         # 0 = disabled, N = stop after N epochs without improvement
+  k_values: [5, 10, "N"]             # k values for @k metrics (N = doc-length)
+  early_stopping_patience: 5         # 0 = disabled, N = stop after N epochs without improvement
   early_stopping_delta: 0.01         # minimum improvement to reset patience counter
-  early_stopping_metric: "val_loss"  # metric to monitor
-  early_stopping_mode: "min"         # "min" for loss, "max" for F1/accuracy
+  early_stopping_metric: "f1@N"  # metric to monitor
+  early_stopping_mode: "max"         # "min" for loss, "max" for F1/accuracy
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable
