@@ -29,7 +29,11 @@ class RefinementEncoder(nn.Module):
     1. Contextual sentence embeddings (pre/post context from the same document)
     2. Learnable boundary markers (pre_marker, post_marker)
     3. A transformer encoder for cross-attention between words and context
-    4. A projection layer for binary classification per token
+    4. A projection layer for classification per token
+
+    Supports both binary classification (num_classes=2) and IOB scheme (num_classes=3):
+    - Binary: 2 classes (0=not keyword, 1=keyword), outputs single logit per token
+    - IOB: 3 classes (0=Outside, 1=Beginning, 2=Inside), outputs 3 logits per token
 
     The input sequence for each sentence is constructed as:
         [pre_context_sentences] + [PRE_MARKER] + [word_embeddings] + [POST_MARKER] + [post_context_sentences]
@@ -45,6 +49,7 @@ class RefinementEncoder(nn.Module):
         max_position_embeddings: int = 768,
         n_left_ctx: int | None = None,
         n_right_ctx: int | None = None,
+        num_classes: int = 3,
     ):
         """Initialize the refinement head.
 
@@ -59,6 +64,7 @@ class RefinementEncoder(nn.Module):
                 If None, use all available preceding sentences in the document.
             n_right_ctx: Maximum number of following sentences to use as context.
                 If None, use all available following sentences in the document.
+            num_classes: Number of output classes. 2 for binary, 3 for IOB scheme.
         """
         super().__init__()
 
@@ -70,6 +76,7 @@ class RefinementEncoder(nn.Module):
         self.max_position_embeddings = max_position_embeddings
         self.n_left_ctx = n_left_ctx
         self.n_right_ctx = n_right_ctx
+        self.num_classes = num_classes
 
         # Transformer encoder layers
         encoder_layer = nn.TransformerEncoderLayer(
@@ -83,8 +90,11 @@ class RefinementEncoder(nn.Module):
             encoder_layer, num_layers=self.num_layers
         )
 
-        # Projection to single logit per token
-        self.projection = nn.Linear(self.d_model, 1)
+        # Projection to logits per token
+        # Binary (num_classes=2): single logit for BCEWithLogitsLoss
+        # IOB (num_classes=3): 3 logits for CrossEntropyLoss
+        proj_dim = 1 if num_classes == 2 else num_classes
+        self.projection = nn.Linear(self.d_model, proj_dim)
 
         # Positional embeddings
         self.position_embeddings = nn.Embedding(
@@ -253,7 +263,9 @@ class RefinementEncoder(nn.Module):
                 sum(sentence_counts) must equal num_sentences.
 
         Returns:
-            Token-level logits of shape (num_sentences, max_seq_len).
+            Token-level logits:
+            - Binary (num_classes=2): shape (num_sentences, max_seq_len)
+            - IOB (num_classes=3): shape (num_sentences, max_seq_len, 3)
             Logits are placed at positions corresponding to input word embeddings.
         """
         device = word_embeddings.device
@@ -276,19 +288,35 @@ class RefinementEncoder(nn.Module):
         output = self.transformer_encoder(input_seq)
 
         # 4. Project to logits and extract word positions
-        output = self.projection(output).squeeze(-1)  # (num_sentences, max_size)
+        output = self.projection(output)
+        if self.num_classes == 2:
+            output = output.squeeze(-1)  # (num_sentences, max_size)
 
         # Compute valid token counts per sentence
         sent_len = attention_mask.sum(dim=1)  # (num_sentences,)
 
         # Extract logits corresponding to word embedding positions
-        masked = torch.zeros(
-            num_sentences, max_seq_len, dtype=torch.float32, device=device
-        )
-        for i in range(num_sentences):
-            start = ctx.word_embs_start[i].item()
-            end = ctx.word_embs_end[i].item()
-            length = int(sent_len[i].item())
-            masked[i, :length] = output[i, start:end]
+        if self.num_classes == 2:
+            masked = torch.zeros(
+                num_sentences, max_seq_len, dtype=torch.float32, device=device
+            )
+            for i in range(num_sentences):
+                start = ctx.word_embs_start[i].item()
+                end = ctx.word_embs_end[i].item()
+                length = int(sent_len[i].item())
+                masked[i, :length] = output[i, start:end]
+        else:
+            masked = torch.zeros(
+                num_sentences,
+                max_seq_len,
+                self.num_classes,
+                dtype=torch.float32,
+                device=device,
+            )
+            for i in range(num_sentences):
+                start = ctx.word_embs_start[i].item()
+                end = ctx.word_embs_end[i].item()
+                length = int(sent_len[i].item())
+                masked[i, :length] = output[i, start:end]
 
         return masked
