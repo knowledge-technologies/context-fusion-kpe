@@ -49,7 +49,9 @@ class KeyphraseDataset(Dataset):
                 - doc_id: Document file identifier
                 - doc_row: Row index within the document file
                 - token_ids: List[int] of token IDs
-                - keyword_mask: List[int] of keyword labels per token (0 or 1)
+                - keyword_mask: List[int] of keyword labels per token
+                  - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside)
+                  - Binary scheme: 0 (not keyword), 1 (keyword)
         """
         row = self.df.row(idx, named=True)
         return {
@@ -213,7 +215,7 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
     # Initialize padded tensors
     input_ids = torch.zeros((num_rows, max_len), dtype=torch.long)
     attention_mask = torch.zeros((num_rows, max_len), dtype=torch.long)
-    target = torch.zeros((num_rows, max_len), dtype=torch.float)
+    target = torch.zeros((num_rows, max_len), dtype=torch.long)
 
     # Fill tensors row by row
     for i, sample in enumerate(batch):
@@ -223,7 +225,7 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
 
         input_ids[i, :seq_len] = torch.tensor(tokens, dtype=torch.long)
         attention_mask[i, :seq_len] = 1
-        target[i, :seq_len] = torch.tensor(kw_mask, dtype=torch.float)
+        target[i, :seq_len] = torch.tensor(kw_mask, dtype=torch.long)
 
     # Compute sentence_counts from (doc_id, doc_row) groupings
     # This counts consecutive sentences with the same document identity
