@@ -18,17 +18,22 @@ TITLE = "evaluating the novelty of text-mined rules using lexical knowledge"
 
 
 def test_build_keyword_regex():
+    import regex
 
-    TEST_KEYWORDS = ["language models", "language models", "machine learning"]
-    EXPECTED_N_STEMMED_KEYWORDS = 2
+    TEST_KEYWORDS = ["language models", "machine learning"]
 
-    regex_patter, stemmed_keywords = build_keyword_regex(
-        keywords=TEST_KEYWORDS, stemmer=PorterStemmer()
-    )
+    pattern = build_keyword_regex(keywords=TEST_KEYWORDS, stemmer=PorterStemmer())
 
-    assert len(stemmed_keywords) == len(TEST_KEYWORDS)
-    assert len(set(stemmed_keywords)) == EXPECTED_N_STEMMED_KEYWORDS
-    assert set(stemmed_keywords) == {"languag model", "machin learn"}
+    assert isinstance(pattern, regex.Pattern)
+
+    text = "language models and machine learning are popular"
+    matches = [m.group(0) for m in pattern.finditer(text)]
+    assert "language models" in matches
+    assert "machine learning" in matches
+
+    text2 = "language modelsing should not match"
+    matches2 = [m.group(0) for m in pattern.finditer(text2)]
+    assert "language models" not in matches2
 
 
 def test_keyword_regex_word_boundaries():
@@ -49,7 +54,7 @@ def test_keyword_regex_word_boundaries():
 
     keywords = ["ai", "aibo", "ibm", "london", "robots", "teamlab"]
 
-    pattern, stemmed = build_keyword_regex(keywords, PorterStemmer())
+    pattern = build_keyword_regex(keywords, PorterStemmer())
 
     matches = [m.group(0) for m in pattern.finditer(abstract.lower())]
 
