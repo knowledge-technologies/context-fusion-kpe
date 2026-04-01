@@ -1,4 +1,4 @@
-from keyword_pecker.data import build_keyword_regex
+from keyword_pecker.data import build_keyword_regex, create_keyword_mask
 from nltk.stem.porter import PorterStemmer
 
 ABSTRACT = (
@@ -70,3 +70,68 @@ def test_keyword_regex_word_boundaries():
     assert "aims" not in matches
     assert "cocktails" not in matches
     assert "explained" not in matches
+
+
+def test_create_keyword_mask():
+
+    SENT_LEN = 10
+    KEYWORD_RANGES = [(2, 5), (6, 8)]
+
+    kw_mask = create_keyword_mask(
+        keyword_token_ranges=KEYWORD_RANGES,
+        sent_tok_len=SENT_LEN,
+        scheme="binary",
+    )
+
+    assert len(kw_mask) == SENT_LEN
+    assert sum(kw_mask) == 5
+
+    kw_mask = create_keyword_mask(
+        keyword_token_ranges=KEYWORD_RANGES,
+        sent_tok_len=SENT_LEN,
+        scheme="IOB",
+    )
+
+    assert len(kw_mask) == SENT_LEN
+    assert sum(kw_mask) == 8
+
+
+def test_create_keyword_mask_iob_detailed():
+    """Test IOB labeling scheme with detailed assertions."""
+
+    SENT_LEN = 10
+
+    kw_mask_single = create_keyword_mask(
+        keyword_token_ranges=[(2, 3)],
+        sent_tok_len=SENT_LEN,
+        scheme="IOB",
+    )
+    assert kw_mask_single[2].item() == 1
+    assert sum(kw_mask_single).item() == 1
+
+    kw_mask_multi = create_keyword_mask(
+        keyword_token_ranges=[(2, 5)],
+        sent_tok_len=SENT_LEN,
+        scheme="IOB",
+    )
+    assert kw_mask_multi[2].item() == 1
+    assert kw_mask_multi[3].item() == 2
+    assert kw_mask_multi[4].item() == 2
+    assert sum(kw_mask_multi).item() == 5
+
+    kw_mask_adjacent = create_keyword_mask(
+        keyword_token_ranges=[(2, 3), (3, 5)],
+        sent_tok_len=SENT_LEN,
+        scheme="IOB",
+    )
+    assert kw_mask_adjacent[2].item() == 1
+    assert kw_mask_adjacent[3].item() == 1
+    assert kw_mask_adjacent[4].item() == 2
+    assert sum(kw_mask_adjacent).item() == 4
+
+    kw_mask_none = create_keyword_mask(
+        keyword_token_ranges=[],
+        sent_tok_len=SENT_LEN,
+        scheme="IOB",
+    )
+    assert all(kw_mask_none == 0)
