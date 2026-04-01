@@ -18,6 +18,10 @@ class KeyphraseModel(nn.Module):
     to produce token-level keyphrase predictions. Supports differential
     learning rates for fine-tuning the base encoder vs training the head.
 
+    Supports both binary classification (num_classes=2) and IOB scheme (num_classes=3):
+    - Binary: 2 classes (0=not keyword, 1=keyword)
+    - IOB: 3 classes (0=Outside, 1=Beginning, 2=Inside)
+
     Architecture:
         Input tokens -> BaseEncoder -> word embeddings -> RefinementEncoder -> token logits
     """
@@ -34,6 +38,7 @@ class KeyphraseModel(nn.Module):
         max_position_embeddings: int = 768,
         n_left_ctx: int | None = None,
         n_right_ctx: int | None = None,
+        num_classes: int = 3,
     ):
         """Initialize the keyphrase extraction model.
 
@@ -50,6 +55,7 @@ class KeyphraseModel(nn.Module):
                 refinement head. If None, use all available.
             n_right_ctx: Maximum number of following sentences for context in
                 refinement head. If None, use all available.
+            num_classes: Number of output classes. 2 for binary, 3 for IOB scheme.
         """
         super().__init__()
 
@@ -76,6 +82,7 @@ class KeyphraseModel(nn.Module):
             max_position_embeddings=max_position_embeddings,
             n_left_ctx=n_left_ctx,
             n_right_ctx=n_right_ctx,
+            num_classes=num_classes,
         )
 
     @property
@@ -97,7 +104,9 @@ class KeyphraseModel(nn.Module):
             sentence_counts: List of sentence counts per document.
 
         Returns:
-            Token-level logits of shape (num_sentences, max_seq_len).
+            Token-level logits:
+            - Binary (num_classes=2): shape (num_sentences, max_seq_len)
+            - IOB (num_classes=3): shape (num_sentences, max_seq_len, 3)
         """
         # Get word embeddings from base encoder
         word_embeddings = self.base_encoder(input_ids, attention_mask)
