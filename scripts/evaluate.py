@@ -94,13 +94,15 @@ def load_eval_config(args: argparse.Namespace) -> dict:
         return {
             "batch_size": training_cfg.get("val_batch_size", args.batch_size),
             "device": training_cfg.get("device", args.device),
-            "pos_weight": training_cfg.get("pos_weight", args.pos_weight),
+            "scheme": training_cfg.get("scheme", args.scheme),
+            "num_classes": training_cfg.get("num_classes", args.num_classes),
             "k_values": training_cfg.get("k_values", args.k_values),
         }
     return {
         "batch_size": args.batch_size,
         "device": args.device,
-        "pos_weight": args.pos_weight,
+        "scheme": args.scheme,
+        "num_classes": args.num_classes,
         "k_values": args.k_values,
     }
 
@@ -151,7 +153,7 @@ def main() -> None:
         model,
         df,
         batch_size=config["batch_size"],
-        pos_weight=config["pos_weight"],
+        num_classes=config["num_classes"],
         device=device,
         split=args.split,
         k_values=config["k_values"],
@@ -170,7 +172,8 @@ def main() -> None:
             "split": args.split,
             "device": config["device"],
             "batch_size": config["batch_size"],
-            "pos_weight": config["pos_weight"],
+            "scheme": config["scheme"],
+            "num_classes": config["num_classes"],
             "k_values": config["k_values"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
