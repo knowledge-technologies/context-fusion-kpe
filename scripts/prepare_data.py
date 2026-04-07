@@ -33,9 +33,11 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from keyword_pecker.data import (
+    compute_class_weights,
     ensure_derived_dir,
     get_dataset_path,
     get_derived_path,
+    get_metadata_path,
     list_dataset_files,
     load_spacy_model,
     process_dataset,
@@ -198,10 +200,15 @@ def main() -> None:
 
     # Write metadata
     if config["output"]["write_metadata"] and processing_stats:
+        scheme = config["preprocessing"].get("scheme", "IOB")
+        num_classes = 3 if scheme == "IOB" else 2
+
         metadata = {
             "dataset": args.dataset,
             "processed_at": datetime.now().isoformat(),
             "config": config,
+            "scheme": scheme,
+            "num_classes": num_classes,
             "limit": args.limit,
             "stats": {
                 "total_documents": total_documents,
@@ -209,7 +216,17 @@ def main() -> None:
             },
             "splits": processing_stats,
         }
-        metadata_path = derived_dir / "metadata.json"
+
+        # Compute class weights from training split
+        train_path = get_derived_path(args.dataset, "train")
+        if train_path.exists():
+            import polars as pl
+
+            train_df = pl.read_parquet(train_path)
+            metadata["class_weights"] = compute_class_weights(train_df, num_classes)
+            logger.info(f"Class weights: {metadata['class_weights']}")
+
+        metadata_path = get_metadata_path(args.dataset)
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2)
         logger.info(f"Wrote metadata to {metadata_path}")
