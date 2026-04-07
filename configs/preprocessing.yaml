@@ -26,6 +26,10 @@ matching:
   stemmer: "porter"
   case_sensitive: false
 
+# Preprocessing scheme
+preprocessing:
+  scheme: "IOB"
+
 # Processing options
 processing:
   device: "cpu"
