@@ -6,6 +6,13 @@ dist/
 wheels/
 *.egg-info
 tmp
+*.png
+.agents
+
+# slides and javascript
+notebooks/*/slides_files/*
+*.html
+.DS_Store
 
 # Virtual environments
 .venv
