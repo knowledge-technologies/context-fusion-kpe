@@ -17,7 +17,7 @@ import torch
 import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from keyword_pecker.data import create_keyphrase_dataloader
+from keyword_pecker.data import compute_class_weights, create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer.early_stopping import EarlyStopping
 from keyword_pecker.trainer.validate import evaluate_model
@@ -35,7 +35,8 @@ def train(
     inner_batch_size: int,
     base_lr: float,
     head_lr: float,
-    pos_weight: float,
+    num_classes: int = 3,
+    class_weights: list[float] | None = None,
     log_every: int,
     device: torch.device,
     metrics_filename: Path,
@@ -68,7 +69,9 @@ def train(
         inner_batch_size: Sentences per forward pass.
         base_lr: Learning rate for base encoder parameters.
         head_lr: Learning rate for refinement head parameters.
-        pos_weight: Positive class weight for BCEWithLogitsLoss.
+        num_classes: Number of output classes (2 for binary, 3 for IOB).
+        class_weights: Optional class weights for loss function. If None, computed
+            from training data for IOB scheme, or defaults to [1.0, 5.0] for binary.
         log_every: Print loss every this many optimizer steps.
         device: Device to run on.
         metrics_filename: Path to the JSONL file where metrics are appended.
@@ -101,10 +104,36 @@ def train(
         f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
     )
 
-    loss_fn = torch.nn.BCEWithLogitsLoss(
-        reduction="none",
-        pos_weight=torch.tensor([[pos_weight]], device=device),
-    )
+    # Setup loss function based on num_classes
+    if num_classes == 2:
+        # Binary classification: BCEWithLogitsLoss
+        if class_weights is None:
+            class_weights = [1.0, 5.0]
+        pos_weight = class_weights[1]
+        loss_fn = torch.nn.BCEWithLogitsLoss(
+            reduction="none",
+            pos_weight=torch.tensor([[pos_weight]], device=device),
+        )
+        logger.info(f"Using BCEWithLogitsLoss with pos_weight={pos_weight}")
+    else:
+        # IOB classification: CrossEntropyLoss with class weights
+        if class_weights is None:
+            class_weights = compute_class_weights(train_df, num_classes)
+        class_weights_tensor = torch.tensor(
+            class_weights, dtype=torch.float32, device=device
+        )
+        loss_fn = torch.nn.CrossEntropyLoss(
+            weight=class_weights_tensor,
+            reduction="none",
+        )
+        logger.info(f"Using CrossEntropyLoss with class_weights={class_weights}")
+
+    # Log class weights to W&B
+    if wandb and class_weights:
+        wandb.log(
+            {f"class_weights/class_{i}": w for i, w in enumerate(class_weights)},
+            step=0,
+        )
 
     inner_per_outer = math.ceil(outer_batch_size / inner_batch_size)
 
@@ -173,7 +202,10 @@ def train(
 
                 logits = model(input_ids, attention_mask, sentence_counts)
 
-                loss = loss_fn(logits, target) * attention_mask
+                if num_classes == 2:
+                    loss = loss_fn(logits, target) * attention_mask
+                else:
+                    loss = loss_fn(logits.transpose(1, 2), target) * attention_mask
                 loss = loss.sum() / attention_mask.sum()
                 loss.backward()
 
@@ -236,7 +268,8 @@ def train(
                             model,
                             val_df,
                             batch_size=val_batch_size,
-                            pos_weight=pos_weight,
+                            num_classes=num_classes,
+                            class_weights=class_weights,
                             device=device,
                             split="val",
                             k_values=k_values,
@@ -269,7 +302,17 @@ def train(
                                 and run_dir is not None
                                 and best_model_state is not None
                             ):
-                                torch.save(best_model_state, run_dir / "model.pt")
+                                checkpoint = {
+                                    "state_dict": best_model_state,
+                                    "metadata": {
+                                        "num_classes": num_classes,
+                                        "scheme": "IOB"
+                                        if num_classes == 3
+                                        else "binary",
+                                        "class_weights": class_weights,
+                                    },
+                                }
+                                torch.save(checkpoint, run_dir / "model.pt")
                                 logger.info(
                                     f"Best model saved to {run_dir / 'model.pt'}"
                                 )
@@ -334,7 +377,8 @@ def train(
                     model,
                     val_df,
                     batch_size=val_batch_size,
-                    pos_weight=pos_weight,
+                    num_classes=num_classes,
+                    class_weights=class_weights,
                     device=device,
                     split="val",
                     k_values=k_values,
@@ -368,12 +412,28 @@ def train(
                             and run_dir is not None
                             and best_model_state is not None
                         ):
-                            torch.save(best_model_state, run_dir / "model.pt")
+                            checkpoint = {
+                                "state_dict": best_model_state,
+                                "metadata": {
+                                    "num_classes": num_classes,
+                                    "scheme": "IOB" if num_classes == 3 else "binary",
+                                    "class_weights": class_weights,
+                                },
+                            }
+                            torch.save(checkpoint, run_dir / "model.pt")
                             logger.info(f"Best model saved to {run_dir / 'model.pt'}")
                         break
 
         if save_weights and run_dir is not None:
-            torch.save(model.state_dict(), run_dir / "model.pt")
+            checkpoint = {
+                "state_dict": model.state_dict(),
+                "metadata": {
+                    "num_classes": num_classes,
+                    "scheme": "IOB" if num_classes == 3 else "binary",
+                    "class_weights": class_weights,
+                },
+            }
+            torch.save(checkpoint, run_dir / "model.pt")
             logger.info(f"Final model saved to {run_dir / 'model.pt'}")
 
     finally:
