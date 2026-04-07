@@ -134,11 +134,18 @@ def main() -> None:
     validate_inputs(checkpoint_path, data_path, args.split)
 
     logger.info(f"Loading checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+
+    if isinstance(checkpoint, dict) and "metadata" in checkpoint:
+        num_classes = checkpoint["metadata"].get("num_classes", 2)
+        state_dict = checkpoint["state_dict"]
+    else:
+        num_classes = 2
+        state_dict = checkpoint
+
     model_config = load_config("configs/models.yaml")["keyphrase_model"]
-    model = KeyphraseModel(**model_config)
-    model.load_state_dict(
-        torch.load(checkpoint_path, map_location="cpu", weights_only=True)
-    )
+    model = KeyphraseModel(**model_config, num_classes=num_classes)
+    model.load_state_dict(state_dict)
     device = torch.device(config["device"])
     model = model.to(device)
     model.eval()
