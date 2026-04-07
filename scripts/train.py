@@ -25,7 +25,7 @@ import polars as pl
 import torch
 from dotenv import load_dotenv
 
-from keyword_pecker.data import get_derived_path
+from keyword_pecker.data import compute_class_weights, get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model, train
 from keyword_pecker.utils import get_logger, init_run_dir, load_config, setup_wandb
@@ -253,6 +253,12 @@ def main() -> None:
     val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
     model = KeyphraseModel(**model_config).to(device)
 
+    # Compute class weights from training data (used for loss weighting)
+    num_classes = hyperparams["num_classes"]
+    class_weights = compute_class_weights(train_df, num_classes)
+    hyperparams["class_weights"] = class_weights
+    logger.info(f"Class weights (from train split): {class_weights}")
+
     try:
         train(
             model,
@@ -263,6 +269,7 @@ def main() -> None:
             base_lr=hyperparams["base_lr"],
             head_lr=hyperparams["head_lr"],
             num_classes=hyperparams["num_classes"],
+            class_weights=hyperparams["class_weights"],
             warmup_ratio=hyperparams["warmup_ratio"],
             log_every=hyperparams["log_every"],
             device=device,
@@ -290,6 +297,7 @@ def main() -> None:
                 test_df,
                 batch_size=hyperparams["val_batch_size"],
                 num_classes=hyperparams["num_classes"],
+                class_weights=hyperparams["class_weights"],
                 device=device,
                 split="test",
                 k_values=hyperparams.get("k_values"),

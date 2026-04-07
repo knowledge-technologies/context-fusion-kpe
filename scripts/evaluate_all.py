@@ -153,9 +153,11 @@ def main() -> None:
 
     if isinstance(checkpoint, dict) and "metadata" in checkpoint:
         num_classes = checkpoint["metadata"].get("num_classes", 2)
+        class_weights = checkpoint["metadata"].get("class_weights")
         state_dict = checkpoint["state_dict"]
     else:
         num_classes = 2
+        class_weights = None
         state_dict = checkpoint
 
     model_config = load_config("configs/models.yaml")["keyphrase_model"]
@@ -181,6 +183,7 @@ def main() -> None:
             df,
             batch_size=config["batch_size"],
             num_classes=config["num_classes"],
+            class_weights=class_weights,
             device=device,
             split=args.split,
             k_values=config["k_values"],

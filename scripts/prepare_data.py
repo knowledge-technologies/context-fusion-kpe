@@ -33,7 +33,6 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from keyword_pecker.data import (
-    compute_class_weights,
     ensure_derived_dir,
     get_dataset_path,
     get_derived_path,
@@ -216,15 +215,6 @@ def main() -> None:
             },
             "splits": processing_stats,
         }
-
-        # Compute class weights from training split
-        train_path = get_derived_path(args.dataset, "train")
-        if train_path.exists():
-            import polars as pl
-
-            train_df = pl.read_parquet(train_path)
-            metadata["class_weights"] = compute_class_weights(train_df, num_classes)
-            logger.info(f"Class weights: {metadata['class_weights']}")
 
         metadata_path = get_metadata_path(args.dataset)
         with open(metadata_path, "w") as f:
