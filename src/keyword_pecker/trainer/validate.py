@@ -170,7 +170,8 @@ def evaluate_model(
     val_df: pl.DataFrame,
     *,
     batch_size: int,
-    pos_weight: float,
+    num_classes: int = 3,
+    class_weights: list[float] | None = None,
     device: torch.device,
     split: str = "val",
     k_values: list[int | str] | None = None,
@@ -183,7 +184,7 @@ def evaluate_model(
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
     This function runs the model in evaluation mode over the given dataset,
-    computing both the BCE loss and keyphrase extraction metrics (precision@k,
+    computing both the loss and keyphrase extraction metrics (precision@k,
     recall@k, F1@k) using exact set matching at the document level.
 
     The evaluation logic is adapted from the legacy training script
@@ -195,7 +196,9 @@ def evaluate_model(
         val_df: Polars DataFrame with columns [doc_id, doc_row, sent_num,
             token_ids, keyword_mask], sorted by (doc_id, doc_row, sent_num).
         batch_size: Number of sentences per forward pass.
-        pos_weight: Positive class weight for BCEWithLogitsLoss.
+        num_classes: Number of output classes (2 for binary, 3 for IOB).
+        class_weights: Optional class weights for loss function. If None, defaults
+            to [1.0, 5.0] for binary scheme.
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
@@ -230,10 +233,26 @@ def evaluate_model(
         num_workers=0,
     )
 
-    loss_fn = torch.nn.BCEWithLogitsLoss(
-        reduction="none",
-        pos_weight=torch.tensor([[pos_weight]], device=device),
-    )
+    if num_classes == 2:
+        if class_weights is None:
+            class_weights = [1.0, 5.0]
+        pos_weight = class_weights[1]
+        loss_fn = torch.nn.BCEWithLogitsLoss(
+            reduction="none",
+            pos_weight=torch.tensor([[pos_weight]], device=device),
+        )
+    else:
+        if class_weights is None:
+            from keyword_pecker.data import compute_class_weights
+
+            class_weights = compute_class_weights(val_df, num_classes)
+        class_weights_tensor = torch.tensor(
+            class_weights, dtype=torch.float32, device=device
+        )
+        loss_fn = torch.nn.CrossEntropyLoss(
+            weight=class_weights_tensor,
+            reduction="none",
+        )
 
     total_loss = 0.0
     total_tokens = 0
@@ -262,7 +281,10 @@ def evaluate_model(
             logits = model(input_ids, attention_mask, sentence_counts)
 
             # Compute masked loss
-            loss = loss_fn(logits, target) * attention_mask
+            if num_classes == 2:
+                loss = loss_fn(logits, target) * attention_mask
+            else:
+                loss = loss_fn(logits.transpose(1, 2), target) * attention_mask
             batch_loss = loss.sum().item()
             batch_tokens = attention_mask.sum().item()
 
