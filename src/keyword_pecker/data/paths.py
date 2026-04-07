@@ -101,6 +101,18 @@ def ensure_derived_dir(dataset_name: str) -> Path:
     return derived_dir
 
 
+def get_metadata_path(dataset_name: str) -> Path:
+    """Get path to metadata.json for dataset.
+
+    Args:
+        dataset_name: Name of dataset.
+
+    Returns:
+        Path to metadata.json file.
+    """
+    return get_derived_path(dataset_name) / "metadata.json"
+
+
 def list_dataset_files(dataset_name: str, pattern: str = "*.json") -> list[Path]:
     """List all files in dataset directory matching pattern.
 
