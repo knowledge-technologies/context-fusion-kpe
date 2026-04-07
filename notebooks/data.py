@@ -11,7 +11,7 @@
 
 import marimo
 
-__generated_with = "0.20.2"
+__generated_with = "0.22.5"
 app = marimo.App(width="medium")
 
 
@@ -73,6 +73,14 @@ def _(AutoTokenizer, PorterStemmer, config, load_spacy_model):
     return nlp, stemmer, tokenizer
 
 
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Example dataset
+    """)
+    return
+
+
 @app.cell
 def _(example_dataset, nlp, process_dataset, stemmer, tokenizer):
     data_rows = process_dataset(
@@ -109,16 +117,55 @@ def _(mo):
     return
 
 
-@app.cell
-def _(example_data, tokenizer):
-    SENTENCE_ID = 2
-    print(f"Input text: {example_data.select('sent_txt')[SENTENCE_ID].item()}")
-    print(
-        f"Tokens: {tokenizer.decode(example_data.select('token_ids')[SENTENCE_ID].item())}"
+@app.cell(hide_code=True)
+def _(example_data, pl, tokenizer):
+    DOC_ID = 5
+    SENTENCE_ID = 4
+
+    row = example_data.filter(
+        pl.col("doc_row") == DOC_ID, pl.col("sent_num") == SENTENCE_ID
     )
-    print(
-        f"Token ids: {example_data.select('token_ids')[SENTENCE_ID].item().to_list()}"
-    )
+
+    print(f"*Document keywords*: {', '.join(row['keywords'].item())}")
+    print(f"*Batch sample (sentence)*: {row.select('sent_txt').item()}")
+    print(f"*Sample tokens*: {tokenizer.decode(row.select('token_ids').item())}")
+    print(f"Target ids: {row.select('keyword_mask').item().to_list()}")
+    print(f"*Token ids*: {row.select('token_ids').item().to_list()}")
+    return (row,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ### Show IOB labeling
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(row, tokenizer):
+    toks = [tokenizer.decode(e) for e in row.select("token_ids").item()]
+    kw_mask = row.select("keyword_mask").item()
+    return kw_mask, toks
+
+
+@app.cell(hide_code=True)
+def _(kw_mask, toks):
+    # Print header
+    print(f"{'Token':<15} {'Keyword':<10}")
+    print("-" * 23)
+
+    # Print rows
+    for tk, kw in zip(toks, kw_mask):
+        print(f"{tk:<15} {kw:<10}")
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Dataloader and sample batch
+    """)
     return
 
 
@@ -151,6 +198,14 @@ def _(dataloader):
 @app.cell
 def _(pprint, sample_batch):
     pprint(sample_batch)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    ## Model and forward pass test
+    """)
     return
 
 
