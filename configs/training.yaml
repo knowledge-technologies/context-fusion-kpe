@@ -5,7 +5,8 @@ training:
   val_batch_size: 100                # batch size for validation
   base_lr: 8.0e-6                    # learning rate for base encoder parameters
   head_lr: 1.0e-5                    # learning rate for refinement head parameters
-  pos_weight: 5.0                    # positive class weight for BCEWithLogitsLoss
+  scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
+  num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
   warmup_ratio: 0.1                  # fraction of training steps for warmup
   log_every: 100                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
