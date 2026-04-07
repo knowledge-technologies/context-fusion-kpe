@@ -86,10 +86,17 @@ def parse_args() -> argparse.Namespace:
         help="Learning rate for refinement head parameters (default: 5e-5)",
     )
     parser.add_argument(
-        "--pos-weight",
-        type=float,
-        default=5.0,
-        help="Positive class weight for BCEWithLogitsLoss (default: 5.0)",
+        "--scheme",
+        type=str,
+        default="IOB",
+        choices=["binary", "IOB"],
+        help="Labeling scheme: binary (0/1) or IOB (0/1/2) (default: IOB)",
+    )
+    parser.add_argument(
+        "--num-classes",
+        type=int,
+        default=3,
+        help="Number of output classes (2 for binary, 3 for IOB) (default: 3)",
     )
     parser.add_argument(
         "--warmup-ratio",
@@ -202,7 +209,8 @@ def main() -> None:
             "inner_batch_size": args.inner_batch_size,
             "base_lr": args.base_lr,
             "head_lr": args.head_lr,
-            "pos_weight": args.pos_weight,
+            "scheme": args.scheme,
+            "num_classes": args.num_classes,
             "warmup_ratio": args.warmup_ratio,
             "log_every": args.log_every,
             "device": args.device,
@@ -254,7 +262,7 @@ def main() -> None:
             inner_batch_size=hyperparams["inner_batch_size"],
             base_lr=hyperparams["base_lr"],
             head_lr=hyperparams["head_lr"],
-            pos_weight=hyperparams["pos_weight"],
+            num_classes=hyperparams["num_classes"],
             warmup_ratio=hyperparams["warmup_ratio"],
             log_every=hyperparams["log_every"],
             device=device,
@@ -281,7 +289,7 @@ def main() -> None:
                 model,
                 test_df,
                 batch_size=hyperparams["val_batch_size"],
-                pos_weight=hyperparams["pos_weight"],
+                num_classes=hyperparams["num_classes"],
                 device=device,
                 split="test",
                 k_values=hyperparams.get("k_values"),

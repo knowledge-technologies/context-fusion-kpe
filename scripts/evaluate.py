@@ -62,10 +62,17 @@ def parse_args() -> argparse.Namespace:
         help="Device for inference: cpu, cuda, mps (default: cpu)",
     )
     parser.add_argument(
-        "--pos-weight",
-        type=float,
-        default=5.0,
-        help="Positive class weight for BCEWithLogitsLoss (default: 5.0)",
+        "--scheme",
+        type=str,
+        default="IOB",
+        choices=["binary", "IOB"],
+        help="Labeling scheme: binary (0/1) or IOB (0/1/2) (default: IOB)",
+    )
+    parser.add_argument(
+        "--num-classes",
+        type=int,
+        default=3,
+        help="Number of output classes (2 for binary, 3 for IOB) (default: 3)",
     )
     parser.add_argument(
         "--k-values",
