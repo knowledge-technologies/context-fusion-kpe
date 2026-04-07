@@ -32,6 +32,7 @@ from keyword_pecker.data.paths import (
     get_dataset_folder,
     get_dataset_path,
     get_derived_path,
+    get_metadata_path,
     list_dataset_files,
 )
 from keyword_pecker.data.preprocessing import (
@@ -48,7 +49,10 @@ from keyword_pecker.data.preprocessing import (
     tokenize_sentences,
     write_parquet,
 )
-from keyword_pecker.data.dataset import create_keyphrase_dataloader
+from keyword_pecker.data.dataset import (
+    compute_class_weights,
+    create_keyphrase_dataloader,
+)
 
 __all__ = [
     # Path utilities
@@ -56,6 +60,7 @@ __all__ = [
     "get_dataset_folder",
     "get_dataset_path",
     "get_derived_path",
+    "get_metadata_path",
     "list_dataset_files",
     # Preprocessing functions
     "SENTENCE_SCHEMA",
@@ -71,5 +76,6 @@ __all__ = [
     "tokenize_sentences",
     "write_parquet",
     # Dataloader
+    "compute_class_weights",
     "create_keyphrase_dataloader",
 ]
