@@ -22,16 +22,13 @@ class KeyphraseResult(NamedTuple):
     score: float
 
 
-def extract_ranked_keyphrases(
+def _decode_binary_keyphrases(
     predictions: torch.Tensor,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
 ) -> list[list[tuple[str, float]]]:
-    """Extract keyphrases ranked by model confidence.
-
-    Converts logits to probabilities via sigmoid, then extracts contiguous
-    spans of tokens where probability > 0.5, treating each span as a keyword.
+    """Extract keyphrases from binary predictions using sigmoid + threshold.
 
     Args:
         predictions: Model logits of shape (batch_size, max_seq_len).
@@ -41,11 +38,9 @@ def extract_ranked_keyphrases(
 
     Returns:
         List of keyword lists with confidence scores, one per sentence.
-        Each element is a list of (keyword, confidence) tuples sorted by
-        confidence descending.
     """
     batch_size = predictions.shape[0]
-    all_ranked_keywords: list[list[tuple[str, float]]] = []
+    all_keywords: list[list[tuple[str, float]]] = []
 
     probs = torch.sigmoid(predictions)
 
@@ -93,9 +88,134 @@ def extract_ranked_keyphrases(
                 seen.add(kw)
                 deduped.append((kw, score))
 
-        all_ranked_keywords.append(deduped)
+        all_keywords.append(deduped)
 
-    return all_ranked_keywords
+    return all_keywords
+
+
+def _decode_iob_keyphrases(
+    predictions: torch.Tensor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    tokenizer,
+) -> list[list[tuple[str, float]]]:
+    """Extract keyphrases from IOB predictions using argmax + B/I/O decoding.
+
+    Args:
+        predictions: Model logits of shape (batch_size, max_seq_len, 3).
+        input_ids: Token IDs of shape (batch_size, max_seq_len).
+        attention_mask: Attention mask of shape (batch_size, max_seq_len).
+        tokenizer: HuggingFace tokenizer for decoding tokens.
+
+    Returns:
+        List of keyword lists with confidence scores, one per sentence.
+    """
+    batch_size = predictions.shape[0]
+    all_keywords: list[list[tuple[str, float]]] = []
+
+    class_preds = torch.argmax(predictions, dim=-1)
+    probs = torch.softmax(predictions, dim=-1)
+
+    for i in range(batch_size):
+        seq_len = attention_mask[i].sum().item()
+
+        token_ids = input_ids[i, 1 : seq_len - 1]
+        token_preds = class_preds[i, 1 : seq_len - 1]
+        token_probs = probs[i, 1 : seq_len - 1]
+
+        keywords_with_scores: list[tuple[str, float]] = []
+
+        current_tokens: list[int] = []
+        current_probs: list[float] = []
+
+        for j in range(len(token_ids)):
+            pred = token_preds[j].item()
+            prob = token_probs[j, pred].item()
+
+            if pred == 1:
+                if current_tokens:
+                    decoded = tokenizer.decode(torch.tensor(current_tokens))
+                    keyword = re.sub(r" - ", "-", decoded.strip())
+                    if keyword:
+                        max_prob = max(current_probs)
+                        keywords_with_scores.append((keyword, max_prob))
+
+                current_tokens = [token_ids[j].item()]
+                current_probs = [prob]
+
+            elif pred == 2:
+                if current_tokens:
+                    current_tokens.append(token_ids[j].item())
+                    current_probs.append(prob)
+
+            else:
+                if current_tokens:
+                    decoded = tokenizer.decode(torch.tensor(current_tokens))
+                    keyword = re.sub(r" - ", "-", decoded.strip())
+                    if keyword:
+                        max_prob = max(current_probs)
+                        keywords_with_scores.append((keyword, max_prob))
+                    current_tokens = []
+                    current_probs = []
+
+        if current_tokens:
+            decoded = tokenizer.decode(torch.tensor(current_tokens))
+            keyword = re.sub(r" - ", "-", decoded.strip())
+            if keyword:
+                max_prob = max(current_probs)
+                keywords_with_scores.append((keyword, max_prob))
+
+        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+
+        seen: set[str] = set()
+        deduped: list[tuple[str, float]] = []
+        for kw, score in keywords_with_scores:
+            if kw not in seen:
+                seen.add(kw)
+                deduped.append((kw, score))
+
+        all_keywords.append(deduped)
+
+    return all_keywords
+
+
+def extract_ranked_keyphrases(
+    predictions: torch.Tensor,
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    tokenizer,
+    num_classes: int | None = None,
+) -> list[list[tuple[str, float]]]:
+    """Extract keyphrases ranked by model confidence.
+
+    Supports both binary and IOB classification schemes:
+    - Binary (num_classes=2): Uses sigmoid + 0.5 threshold
+    - IOB (num_classes=3): Uses argmax to decode B/I/O tags
+
+    Args:
+        predictions: Model logits.
+            - Binary: shape (batch_size, max_seq_len)
+            - IOB: shape (batch_size, max_seq_len, 3)
+        input_ids: Token IDs of shape (batch_size, max_seq_len).
+        attention_mask: Attention mask of shape (batch_size, max_seq_len).
+        tokenizer: HuggingFace tokenizer for decoding tokens.
+        num_classes: Number of output classes. If None, auto-detect from shape.
+            2 for binary, 3 for IOB scheme.
+
+    Returns:
+        List of keyword lists with confidence scores, one per sentence.
+        Each element is a list of (keyword, confidence) tuples sorted by
+        confidence descending.
+    """
+    if num_classes is None:
+        num_classes = 3 if predictions.dim() == 3 else 2
+
+    if num_classes == 2:
+        return _decode_binary_keyphrases(
+            predictions, input_ids, attention_mask, tokenizer
+        )
+    else:
+        return _decode_iob_keyphrases(predictions, input_ids, attention_mask, tokenizer)
 
 
 _spacy_model: spacy.Language | None = None
@@ -190,7 +310,11 @@ def predict_keyphrases(
         logits = model(input_ids, attention_mask, sentence_counts)
 
     ranked_keyphrases = extract_ranked_keyphrases(
-        logits, input_ids, attention_mask, model.tokenizer
+        logits,
+        input_ids,
+        attention_mask,
+        model.tokenizer,
+        num_classes=model.refinement_head.num_classes,
     )
 
     all_keyphrases: dict[str, float] = {}
