@@ -197,8 +197,8 @@ def evaluate_model(
             token_ids, keyword_mask], sorted by (doc_id, doc_row, sent_num).
         batch_size: Number of sentences per forward pass.
         num_classes: Number of output classes (2 for binary, 3 for IOB).
-        class_weights: Optional class weights for loss function. If None, defaults
-            to [1.0, 5.0] for binary scheme.
+        class_weights: Class weights for loss function. Required for IOB scheme;
+            defaults to [1.0, 5.0] for binary scheme.
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
@@ -242,10 +242,6 @@ def evaluate_model(
             pos_weight=torch.tensor([[pos_weight]], device=device),
         )
     else:
-        if class_weights is None:
-            from keyword_pecker.data import compute_class_weights
-
-            class_weights = compute_class_weights(val_df, num_classes)
         class_weights_tensor = torch.tensor(
             class_weights, dtype=torch.float32, device=device
         )
