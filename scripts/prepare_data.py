@@ -161,41 +161,41 @@ def main() -> None:
             logger.info(f"Skipping {filepath.name} (output exists, use --overwrite)")
             continue
 
-    # Determine labeling scheme
-    scheme = config.get("preprocessing", {}).get("scheme", "IOB")
+        # Determine labeling scheme
+        scheme = config.get("preprocessing", {}).get("scheme", "IOB")
 
-    # Process file
-    logger.info(f"Preprocessing (segmentation, tokenizing...) {filepath.name}...")
-    processed_data = process_dataset(
-        filepath=filepath,
-        nlp=nlp,
-        spacy_batch_size=config["segmentation"]["batch_size"],
-        spacy_n_process=config["segmentation"]["n_process"],
-        tokenizer=tokenizer,
-        stemmer=stemmer,
-        scheme=scheme,
-        limit=args.limit,
-        device=device,
-        show_progress=True,
-    )
+        # Process file
+        logger.info(f"Preprocessing (segmentation, tokenizing...) {filepath.name}...")
+        processed_data = process_dataset(
+            filepath=filepath,
+            nlp=nlp,
+            spacy_batch_size=config["segmentation"]["batch_size"],
+            spacy_n_process=config["segmentation"]["n_process"],
+            tokenizer=tokenizer,
+            stemmer=stemmer,
+            scheme=scheme,
+            limit=args.limit,
+            device=device,
+            show_progress=True,
+        )
 
-    # Write to Parquet
-    num_rows = write_parquet(processed_data, output_path)
+        # Write to Parquet
+        num_rows = write_parquet(processed_data, output_path)
 
-    # Track stats
-    doc_rows = set(row["doc_row"] for row in processed_data)
-    num_docs = len(doc_rows)
-    total_sentences += num_rows
-    total_documents += num_docs
+        # Track stats
+        doc_rows = set(row["doc_row"] for row in processed_data)
+        num_docs = len(doc_rows)
+        total_sentences += num_rows
+        total_documents += num_docs
 
-    processing_stats[split_name] = {
-        "source_file": filepath.name,
-        "output_file": output_path.name,
-        "num_documents": num_docs,
-        "num_sentences": num_rows,
-    }
+        processing_stats[split_name] = {
+            "source_file": filepath.name,
+            "output_file": output_path.name,
+            "num_documents": num_docs,
+            "num_sentences": num_rows,
+        }
 
-    logger.info(f"Wrote {num_rows} sentences from {num_docs} documents")
+        logger.info(f"Wrote {num_rows} sentences from {num_docs} documents")
 
     # Write metadata
     if config["output"]["write_metadata"] and processing_stats:
