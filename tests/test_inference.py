@@ -3,7 +3,10 @@
 import torch
 from transformers import AutoTokenizer
 
-from keyword_pecker.models.inference import extract_ranked_keyphrases
+from keyword_pecker.models.inference import (
+    aggregate_document_keyphrases,
+    extract_ranked_keyphrases,
+)
 
 
 def _create_mock_tokenizer():
@@ -80,6 +83,167 @@ def test_extract_ranked_keyphrases_multiword_keyword():
     keyword, score = results[0][0]
     assert "natural" in keyword.lower() or "language" in keyword.lower()
     assert score > 0.5
+
+
+# ============================================================================
+# Tests for aggregate_document_keyphrases
+# ============================================================================
+
+
+def test_aggregate_document_keyphrases_basic():
+    """Test basic aggregation of multiple sentences to single document."""
+    predictions = [
+        [("machine learning", 0.9), ("neural networks", 0.8)],
+        [("deep learning", 0.85)],
+    ]
+    doc_ids = ["doc1", "doc1"]
+    doc_rows = [0, 0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    assert ("doc1", 0) in result
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    assert len(keywords) == 3
+    assert "machine learning" in keywords
+    assert "neural networks" in keywords
+    assert "deep learning" in keywords
+
+
+def test_aggregate_document_keyphrases_multi_document():
+    """Test aggregation across multiple documents."""
+    predictions = [
+        [("keyword1", 0.9)],
+        [("keyword2", 0.8)],
+        [("keyword3", 0.7)],
+    ]
+    doc_ids = ["doc1", "doc1", "doc2"]
+    doc_rows = [0, 0, 0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    assert len(result) == 2
+    assert ("doc1", 0) in result
+    assert ("doc2", 0) in result
+    assert len(result[("doc1", 0)]) == 2
+    assert len(result[("doc2", 0)]) == 1
+
+
+def test_aggregate_document_keyphrases_punctuation_filtering():
+    """Test that keyphrases with disallowed punctuation are filtered out."""
+    predictions = [
+        [("machine learning", 0.9), ("data, science", 0.8)],
+        [("neural-network", 0.85), ("don't", 0.7)],
+        [("test (keyword)", 0.6)],
+    ]
+    doc_ids = ["doc1", "doc1", "doc1"]
+    doc_rows = [0, 0, 0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    assert "machine learning" in keywords
+    assert "neural-network" in keywords
+    assert "don't" in keywords
+    assert "data, science" not in keywords
+    assert "test (keyword)" not in keywords
+
+
+def test_aggregate_document_keyphrases_deduplication_case_insensitive():
+    """Test case-insensitive deduplication."""
+    predictions = [
+        [("Machine Learning", 0.9), ("machine learning", 0.95)],
+        [("MACHINE LEARNING", 0.8)],
+        [("neural network", 0.7)],
+    ]
+    doc_ids = ["doc1", "doc1", "doc1"]
+    doc_rows = [0, 0, 0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    assert len(keywords) == 2
+    ml_result = next(
+        (kw, score)
+        for kw, score in result[("doc1", 0)]
+        if kw.lower() == "machine learning"
+    )
+    assert ml_result[1] == 0.95
+
+
+def test_aggregate_document_keyphrases_capping():
+    """Test that results are capped at max_keywords."""
+    predictions = [[(f"keyword{i}", 0.9 - i * 0.01) for i in range(15)]]
+    doc_ids = ["doc1"]
+    doc_rows = [0]
+
+    result = aggregate_document_keyphrases(
+        predictions, doc_ids, doc_rows, max_keywords=10
+    )
+
+    assert len(result[("doc1", 0)]) == 10
+
+
+def test_aggregate_document_keyphrases_no_cap():
+    """Test that max_keywords=None returns all keywords."""
+    predictions = [[(f"keyword{i}", 0.9 - i * 0.01) for i in range(15)]]
+    doc_ids = ["doc1"]
+    doc_rows = [0]
+
+    result = aggregate_document_keyphrases(
+        predictions, doc_ids, doc_rows, max_keywords=None
+    )
+
+    assert len(result[("doc1", 0)]) == 15
+
+
+def test_aggregate_document_keyphrases_empty_predictions():
+    """Test handling of empty predictions."""
+    predictions = [[], []]
+    doc_ids = ["doc1", "doc1"]
+    doc_rows = [0, 0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    assert ("doc1", 0) in result
+    assert len(result[("doc1", 0)]) == 0
+
+
+def test_aggregate_document_keyphrases_all_filtered():
+    """Test when all keywords are filtered out due to punctuation."""
+    predictions = [[("test, keyword", 0.9), ("another (one)", 0.8)]]
+    doc_ids = ["doc1"]
+    doc_rows = [0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    assert len(result[("doc1", 0)]) == 0
+
+
+def test_aggregate_document_keyphrases_score_ranking():
+    """Test that results are sorted by score descending."""
+    predictions = [
+        [("keyword1", 0.5), ("keyword2", 0.9), ("keyword3", 0.7)],
+    ]
+    doc_ids = ["doc1"]
+    doc_rows = [0]
+
+    result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
+
+    scores = [score for _, score in result[("doc1", 0)]]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_aggregate_document_keyphrases_no_punctuation_filter():
+    """Test that filter_punctuation=False keeps all keywords."""
+    predictions = [[("test, keyword", 0.9), ("another (one)", 0.8)]]
+    doc_ids = ["doc1"]
+    doc_rows = [0]
+
+    result = aggregate_document_keyphrases(
+        predictions, doc_ids, doc_rows, filter_punctuation=False
+    )
+
+    assert len(result[("doc1", 0)]) == 2
 
 
 def test_extract_ranked_keyphrases_batch():
