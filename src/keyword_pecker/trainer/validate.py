@@ -28,7 +28,10 @@ import tqdm
 
 from keyword_pecker.data import create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.models.inference import extract_ranked_keyphrases
+from keyword_pecker.models.inference import (
+    aggregate_document_keyphrases,
+    extract_ranked_keyphrases,
+)
 from keyword_pecker.trainer.external import eval as eval_module
 from keyword_pecker.utils import get_logger
 
@@ -395,32 +398,17 @@ def evaluate_model(
     # Compute mean loss
     val_loss = total_loss / total_tokens if total_tokens > 0 else 0.0
 
-    # Aggregate predictions to document level
-    doc_to_pred_ranked: dict[tuple[str, int], list[tuple[str, float]]] = {}
-
-    # Get document identifiers for each sentence
+    # Aggregate predictions to document level with filtering, deduplication, and capping
     doc_ids = val_df["doc_id"].to_list()
     doc_rows = val_df["doc_row"].to_list()
 
-    for i, (doc_id, doc_row) in enumerate(zip(doc_ids, doc_rows)):
-        key = (doc_id, doc_row)
-
-        if key not in doc_to_pred_ranked:
-            doc_to_pred_ranked[key] = []
-
-        if i < len(all_ranked_predictions):
-            doc_to_pred_ranked[key].extend(all_ranked_predictions[i])
-
-    # Sort predictions by confidence and deduplicate per document
-    for key in doc_to_pred_ranked:
-        seen: set[str] = set()
-        deduped: list[tuple[str, float]] = []
-        for kw, score in doc_to_pred_ranked[key]:
-            if kw not in seen:
-                seen.add(kw)
-                deduped.append((kw, score))
-        deduped.sort(key=lambda x: x[1], reverse=True)
-        doc_to_pred_ranked[key] = deduped
+    doc_to_pred_ranked = aggregate_document_keyphrases(
+        all_ranked_predictions,
+        doc_ids,
+        doc_rows,
+        max_keywords=10,
+        filter_punctuation=True,
+    )
 
     # Convert to lists for external eval module (preserve order)
     doc_keys = list(doc_to_gold.keys())
