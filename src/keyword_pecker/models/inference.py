@@ -13,8 +13,9 @@ import spacy
 import torch
 
 from keyword_pecker.data import load_spacy_model
-
 from .keyphrase_model import KeyphraseModel
+
+DISALLOWED_PUNCT_PATTERN = re.compile(r'[!"#$%&()*+,.:;<=>?@[\\\]^_`{|}~]')
 
 
 class KeyphraseResult(NamedTuple):
@@ -218,6 +219,82 @@ def extract_ranked_keyphrases(
         return _decode_iob_keyphrases(predictions, input_ids, attention_mask, tokenizer)
 
 
+def _contains_disallowed_punctuation(keyword: str) -> bool:
+    """Check if keyword contains punctuation other than dash or apostrophe."""
+    return bool(DISALLOWED_PUNCT_PATTERN.search(keyword))
+
+
+def aggregate_document_keyphrases(
+    ranked_predictions: list[list[tuple[str, float]]],
+    doc_ids: list[str],
+    doc_rows: list[int],
+    max_keywords: int | None = 10,
+    filter_punctuation: bool = True,
+) -> dict[tuple[str, int], list[tuple[str, float]]]:
+    """Aggregate sentence-level keyphrase predictions to document level.
+
+    Applies the post-processing pipeline from the reference spec:
+    1. Aggregate predictions by document
+    2. Filter keyphrases containing punctuation (except dashes and apostrophes)
+    3. Deduplicate by keyword string (case-insensitive)
+    4. Sort by confidence score (descending)
+    5. Cap at max_keywords per document
+
+    Args:
+        ranked_predictions: List of keyphrase lists with confidence scores,
+            one per sentence. Each inner list contains (keyword, score) tuples.
+        doc_ids: List of document IDs for each sentence.
+        doc_rows: List of document row indices for each sentence.
+        max_keywords: Maximum number of keywords to return per document.
+            None = unlimited. Defaults to 10 to match reference spec.
+        filter_punctuation: If True, remove keyphrases containing punctuation
+            (except dashes and apostrophes).
+
+    Returns:
+        Dict mapping (doc_id, doc_row) -> list of (keyword, score) tuples,
+        sorted by confidence descending, capped at max_keywords.
+    """
+    # Step 1: Aggregate predictions by document
+    doc_to_pred: dict[tuple[str, int], list[tuple[str, float]]] = {}
+    for i, (doc_id, doc_row) in enumerate(zip(doc_ids, doc_rows)):
+        key = (doc_id, doc_row)
+        if key not in doc_to_pred:
+            doc_to_pred[key] = []
+        if i < len(ranked_predictions):
+            doc_to_pred[key].extend(ranked_predictions[i])
+
+    # Step 2-5: Process each document
+    for key in doc_to_pred:
+        predictions = doc_to_pred[key]
+
+        # Step 2: Filter punctuation (except dashes and apostrophes)
+        if filter_punctuation:
+            predictions = [
+                (kw, score)
+                for kw, score in predictions
+                if kw.strip() and not _contains_disallowed_punctuation(kw)
+            ]
+
+        # Step 3: Deduplicate (case-insensitive) - keep highest score
+        seen: dict[str, tuple[str, float]] = {}  # lowercase_kw -> (original_kw, score)
+        for kw, score in predictions:
+            kw_lower = kw.lower()
+            if kw_lower not in seen or score > seen[kw_lower][1]:
+                seen[kw_lower] = (kw, score)
+
+        # Step 4: Sort by score descending
+        deduped = list(seen.values())
+        deduped.sort(key=lambda x: x[1], reverse=True)
+
+        # Step 5: Cap at max_keywords
+        if max_keywords is not None:
+            deduped = deduped[:max_keywords]
+
+        doc_to_pred[key] = deduped
+
+    return doc_to_pred
+
+
 _spacy_model: spacy.Language | None = None
 
 
@@ -317,16 +394,20 @@ def predict_keyphrases(
         num_classes=model.refinement_head.num_classes,
     )
 
-    all_keyphrases: dict[str, float] = {}
-    for sent_keyphrases in ranked_keyphrases:
-        for keyword, score in sent_keyphrases:
-            if keyword not in all_keyphrases or score > all_keyphrases[keyword]:
-                all_keyphrases[keyword] = score
+    # Aggregate to document level with filtering, deduplication, and capping
+    doc_ids = ["doc_0"] * len(sentences)
+    doc_rows = [0] * len(sentences)
+    max_kw = nr_keywords if nr_keywords is not None else 10
 
-    sorted_keyphrases = sorted(all_keyphrases.items(), key=lambda x: x[1], reverse=True)
+    doc_results = aggregate_document_keyphrases(
+        ranked_keyphrases,
+        doc_ids,
+        doc_rows,
+        max_keywords=max_kw,
+        filter_punctuation=True,
+    )
 
-    if nr_keywords is not None:
-        sorted_keyphrases = sorted_keyphrases[:nr_keywords]
+    sorted_keyphrases = doc_results.get(("doc_0", 0), [])
 
     if return_scores:
         return [KeyphraseResult(kw, score) for kw, score in sorted_keyphrases]
