@@ -1,17 +1,21 @@
 """Evaluation module for keyphrase extraction model.
 
 This module provides evaluation functionality for the keyphrase extraction model,
-computing both loss and keyphrase extraction metrics (precision, recall, F1).
+computing both loss and keyphrase extraction metrics (precision@k, recall@k, F1@k).
 It supports evaluating any dataset split (e.g. "val", "test") by passing the
 ``split`` parameter to :func:`evaluate_model`.
 
-The evaluation logic is adapted from the legacy training script (tmp/train-model.py
-lines 302-531), refactored to use Polars DataFrames and the project's established
-data loading patterns.
+Metrics are computed using the external eval module from TNT-KID
+(:mod:`keyword_pecker.trainer.external.eval`), which applies Porter stemming
+before exact word-by-word matching and uses macro-averaging (average per-document
+P/R, then compute F1). This matches the evaluation methodology used in prior
+keyword extraction benchmarks.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import random
 import re
@@ -25,6 +29,7 @@ import tqdm
 from keyword_pecker.data import create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.models.inference import extract_ranked_keyphrases
+from keyword_pecker.trainer.external import eval as eval_module
 from keyword_pecker.utils import get_logger
 
 logger = get_logger("validate")
@@ -88,6 +93,10 @@ def compute_keyphrase_metrics(
 ) -> dict[str, float]:
     """Compute precision, recall, and F1 using exact set matching.
 
+    .. deprecated::
+        Use :func:`compute_metrics_at_k_external` instead, which uses Porter
+        stemming and macro-averaging to match prior benchmark evaluations.
+
     This function replicates the metrics computation from the legacy code
     (tmp/train-model.py lines 404-414).
 
@@ -123,6 +132,10 @@ def compute_metrics_at_k(
     k_values: list[int | str],
 ) -> dict[str, float]:
     """Compute precision@k, recall@k, and F1@k for each k value.
+
+    .. deprecated::
+        Use :func:`compute_metrics_at_k_external` instead, which uses Porter
+        stemming and macro-averaging to match prior benchmark evaluations.
 
     For each document, takes the top-k predicted keywords (ranked by confidence)
     and computes metrics against the gold keywords.
@@ -165,6 +178,76 @@ def compute_metrics_at_k(
     return metrics
 
 
+_EVAL_RESULT_MAP: dict[int | str, dict[str, int]] = {
+    5: {"precision": 0, "recall": 1, "f1": 2},
+    10: {"precision": 3, "recall": 4, "f1": 5},
+    "N": {"precision": 6, "recall": 7, "f1": 8},
+    "M": {"precision": 9, "recall": 10, "f1": 11},
+}
+
+
+def compute_metrics_at_k_external(
+    gold_keywords: list[list[str]],
+    pred_keywords: list[list[str]],
+    k_values: list[int | str] | None = None,
+    remove_docs_with_no_kw: bool = True,
+) -> dict[str, float]:
+    """Compute stemmed, macro-averaged @k metrics using the external eval module.
+
+    This function wraps :func:`keyword_pecker.trainer.external.eval.eval` to compute
+    precision@k, recall@k, and F1@k using Porter stemming and macro-averaging,
+    matching the evaluation methodology from prior keyword extraction benchmarks.
+
+    The external eval module applies Porter stemming before exact word-by-word
+    matching and uses macro-averaging (average per-document P/R, then compute F1).
+
+    Args:
+        gold_keywords: List of gold keyword lists, one per document.
+            Each inner list contains keyword strings (may be multi-word like
+            ``"neural network"``).
+        pred_keywords: List of predicted keyword lists, one per document.
+            Each inner list contains keyword strings in ranked order (highest
+            confidence first).
+        k_values: List of k values to compute metrics for. Supported values:
+            ``5``, ``10``, ``"N"`` (number of gold keywords per document),
+            ``"M"`` (number of predicted keywords per document).
+            Default: ``[5, 10, "N", "M"]``.
+        remove_docs_with_no_kw: If True, skip documents with empty gold keywords
+            (matching eval.py's default behavior).
+
+    Returns:
+        dict with keys:
+            - ``precision@{k}``, ``recall@{k}``, ``f1@{k}`` for each k in k_values
+            - ``num_docs_total``: Total number of documents in input
+            - ``num_docs_removed``: Documents skipped due to empty gold keywords
+            - ``num_docs_evaluated``: Documents actually used in metric computation
+    """
+    if k_values is None:
+        k_values = [5, 10, "N", "M"]
+
+    num_docs_total = len(gold_keywords)
+    num_docs_removed = (
+        sum(1 for g in gold_keywords if len(g) == 0) if remove_docs_with_no_kw else 0
+    )
+    num_docs_evaluated = num_docs_total - num_docs_removed
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = eval_module.eval(pred_keywords, gold_keywords, remove_docs_with_no_kw)
+
+    metrics: dict[str, float] = {}
+    for k_spec in k_values:
+        key_suffix = str(k_spec)
+        for metric_name in ("precision", "recall", "f1"):
+            idx = _EVAL_RESULT_MAP[k_spec][metric_name]
+            metrics[f"{metric_name}@{key_suffix}"] = float(result[idx])
+
+    metrics["num_docs_total"] = float(num_docs_total)
+    metrics["num_docs_removed"] = float(num_docs_removed)
+    metrics["num_docs_evaluated"] = float(num_docs_evaluated)
+
+    return metrics
+
+
 def evaluate_model(
     model: KeyphraseModel,
     val_df: pl.DataFrame,
@@ -185,11 +268,8 @@ def evaluate_model(
 
     This function runs the model in evaluation mode over the given dataset,
     computing both the loss and keyphrase extraction metrics (precision@k,
-    recall@k, F1@k) using exact set matching at the document level.
-
-    The evaluation logic is adapted from the legacy training script
-    (tmp/train-model.py lines 302-531), using the project's established
-    data loading patterns with Polars DataFrames.
+    recall@k, F1@k) using the external eval module which applies Porter stemming
+    and macro-averaging.
 
     Args:
         model: KeyphraseModel to evaluate (will be set to eval mode).
@@ -202,7 +282,9 @@ def evaluate_model(
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
-        k_values: List of k values for @k metrics (default: [5, 10]).
+        k_values: List of k values for @k metrics. Supported: ``5``, ``10``,
+            ``"N"`` (num gold keywords per doc), ``"M"`` (num predicted keywords).
+            Default: ``[5, 10, "N", "M"]``.
         metrics_filename: Optional Path to JSON metrics file (appends records).
         wandb: The wandb module if W&B tracking is active, or None.
         global_step: Current global training step (for logging).
@@ -214,12 +296,13 @@ def evaluate_model(
         dict with keys:
             - ``{split}_loss``: Mean loss over all batches.
             - precision@k, recall@k, f1@k for each k in k_values.
+            - num_docs_total, num_docs_removed, num_docs_evaluated: Document counts.
             - samples: List of dicts with random document samples for qualitative
               analysis. Each dict has keys: doc_id, doc_row, gold_keywords,
               pred_keywords (keyword lists are sorted).
     """
     if k_values is None:
-        k_values = [5, 10, "N"]
+        k_values = [5, 10, "N", "M"]
 
     model.eval()
 
@@ -339,10 +422,10 @@ def evaluate_model(
         deduped.sort(key=lambda x: x[1], reverse=True)
         doc_to_pred_ranked[key] = deduped
 
-    # Convert to lists for metric computation (preserve order)
+    # Convert to lists for external eval module (preserve order)
     doc_keys = list(doc_to_gold.keys())
-    gold_sets = [set(doc_to_gold[k]) for k in doc_keys]
-    pred_ranked = [doc_to_pred_ranked[k] for k in doc_keys]
+    gold_lists = [doc_to_gold[k] for k in doc_keys]
+    pred_lists = [[kw for kw, _ in doc_to_pred_ranked[k]] for k in doc_keys]
 
     # Capture random samples for qualitative analysis
     num_samples = min(15, len(doc_keys))
@@ -355,8 +438,8 @@ def evaluate_model(
             {
                 "doc_id": doc_key[0],
                 "doc_row": doc_key[1],
-                "gold_keywords": sorted(gold_sets[idx]),
-                "pred_keywords": [kw for kw, _ in pred_ranked[idx]],
+                "gold_keywords": sorted(gold_lists[idx]),
+                "pred_keywords": pred_lists[idx],
             }
         )
 
@@ -369,8 +452,8 @@ def evaluate_model(
         doc_to_pred_ranked,
     )
 
-    # Compute @k metrics
-    at_k_metrics = compute_metrics_at_k(gold_sets, pred_ranked, k_values)
+    # Compute @k metrics using external eval module (stemmed, macro-averaged)
+    at_k_metrics = compute_metrics_at_k_external(gold_lists, pred_lists, k_values)
     metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = dict(
         at_k_metrics
     )
