@@ -32,7 +32,7 @@ from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
 )
-from keyword_pecker.trainer.external import eval as eval_module
+from keyword_pecker.trainer.external import eval as eval_martinc
 from keyword_pecker.utils import get_logger
 
 logger = get_logger("validate")
@@ -189,7 +189,7 @@ _EVAL_RESULT_MAP: dict[int | str, dict[str, int]] = {
 }
 
 
-def compute_metrics_at_k_external(
+def compute_metrics_at_k_martinc(
     gold_keywords: list[list[str]],
     pred_keywords: list[list[str]],
     k_values: list[int | str] | None = None,
@@ -235,7 +235,7 @@ def compute_metrics_at_k_external(
     num_docs_evaluated = num_docs_total - num_docs_removed
 
     with contextlib.redirect_stdout(io.StringIO()):
-        result = eval_module.eval(pred_keywords, gold_keywords, remove_docs_with_no_kw)
+        result = eval_martinc.eval(pred_keywords, gold_keywords, remove_docs_with_no_kw)
 
     metrics: dict[str, float] = {}
     for k_spec in k_values:
@@ -441,7 +441,7 @@ def evaluate_model(
     )
 
     # Compute @k metrics using external eval module (stemmed, macro-averaged)
-    at_k_metrics = compute_metrics_at_k_external(gold_lists, pred_lists, k_values)
+    at_k_metrics = compute_metrics_at_k_martinc(gold_lists, pred_lists, k_values)
     metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = dict(
         at_k_metrics
     )
