@@ -10,7 +10,7 @@ training:
   warmup_ratio: 0.1                  # fraction of training steps for warmup
   log_every: 100                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
-  k_values: [5, 10, "N"]             # k values for @k metrics (N = doc-length)
+  k_values: [5, 10, "N", "M"]         # k values for @k metrics (N = num gold, M = num pred)
   early_stopping_patience: 5         # 0 = disabled, N = stop after N epochs without improvement
   early_stopping_delta: 0.01         # minimum improvement to reset patience counter
   early_stopping_metric: "f1@N"      # metric to monitor
