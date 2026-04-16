@@ -170,10 +170,10 @@ def run_metrics(match_list, pred_list, tgt_list, score_names, topk_range, type="
             cutoff = topk
 
         if len(pred_list) > cutoff:
-            pred_list_k = np.asarray(pred_list[:cutoff])
+            pred_list_k = pred_list[:cutoff]
             match_list_k = match_list[:cutoff]
         else:
-            pred_list_k = np.asarray(pred_list)
+            pred_list_k = pred_list
             match_list_k = match_list
 
         # Micro-Averaged Method
