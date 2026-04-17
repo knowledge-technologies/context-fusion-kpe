@@ -182,10 +182,10 @@ def compute_metrics_at_k(
 
 
 _EVAL_RESULT_MAP: dict[int | str, dict[str, int]] = {
-    5: {"precision": 0, "recall": 1, "f1": 2},
-    10: {"precision": 3, "recall": 4, "f1": 5},
-    "N": {"precision": 6, "recall": 7, "f1": 8},
-    "M": {"precision": 9, "recall": 10, "f1": 11},
+    5: {"precision": 6, "recall": 7, "f1": 8},
+    10: {"precision": 9, "recall": 10, "f1": 11},
+    "N": {"precision": 12, "recall": 13, "f1": 14},
+    "M": {"precision": 15, "recall": 16, "f1": 17},
 }
 
 
