@@ -104,16 +104,36 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_eval_config(args: argparse.Namespace) -> dict:
-    """Load config from training.yaml if --from-config, merge with CLI args."""
+    """Load config from training.yaml if --from_config, merge with CLI args."""
     if args.from_config:
         training_cfg = load_config("configs/training.yaml").get("training", {})
+        eval_cfg = load_config("configs/training.yaml").get("evaluation", {})
         return {
             "batch_size": training_cfg.get("val_batch_size", args.batch_size),
             "device": training_cfg.get("device", args.device),
             "scheme": training_cfg.get("scheme", args.scheme),
             "num_classes": training_cfg.get("num_classes", args.num_classes),
             "k_values": training_cfg.get("k_values", args.k_values),
+            "max_keyphrases": eval_cfg.get("max_keyphrases", 10),
+            "max_keyphrase_length": eval_cfg.get("max_keyphrase_length", 5),
+            "filter_punctuation": eval_cfg.get("filter_punctuation", True),
+            "disallowed_punctuation": eval_cfg.get(
+                "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+            ),
+            "dedup_strategy": eval_cfg.get("dedup_strategy", "stem"),
         }
+    return {
+        "batch_size": args.batch_size,
+        "device": args.device,
+        "scheme": args.scheme,
+        "num_classes": args.num_classes,
+        "k_values": args.k_values,
+        "max_keyphrases": 10,
+        "max_keyphrase_length": 5,
+        "filter_punctuation": True,
+        "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+        "dedup_strategy": "stem",
+    }
     return {
         "batch_size": args.batch_size,
         "device": args.device,
@@ -187,6 +207,11 @@ def main() -> None:
             device=device,
             split=args.split,
             k_values=config["k_values"],
+            max_keyphrases=config["max_keyphrases"],
+            max_keyphrase_length=config["max_keyphrase_length"],
+            filter_punctuation=config["filter_punctuation"],
+            disallowed_punctuation=config["disallowed_punctuation"],
+            dedup_strategy=config["dedup_strategy"],
         )
 
         output_path = evals_dir / f"{dataset}_{args.split}.json"
