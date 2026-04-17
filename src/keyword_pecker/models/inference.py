@@ -11,11 +11,10 @@ from typing import NamedTuple
 
 import spacy
 import torch
+from nltk.stem.porter import PorterStemmer
 
 from keyword_pecker.data import load_spacy_model
 from .keyphrase_model import KeyphraseModel
-
-DISALLOWED_PUNCT_PATTERN = re.compile(r'[!"#$%&()*+,.:;<=>?@[\\\]^_`{|}~]')
 
 
 class KeyphraseResult(NamedTuple):
@@ -68,17 +67,18 @@ def _decode_binary_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        max_prob = max(current_probs)
-                        keywords_with_scores.append((keyword, max_prob))
+                        avg_prob = sum(current_probs) / len(current_probs)
+                        keywords_with_scores.append((keyword, avg_prob))
                     current_tokens = []
                     current_probs = []
 
+        # Flush any remaining tokens at the end of the sequence
         if current_tokens:
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                max_prob = max(current_probs)
-                keywords_with_scores.append((keyword, max_prob))
+                avg_prob = sum(current_probs) / len(current_probs)
+                keywords_with_scores.append((keyword, avg_prob))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -138,8 +138,8 @@ def _decode_iob_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        max_prob = max(current_probs)
-                        keywords_with_scores.append((keyword, max_prob))
+                        avg_prob = sum(current_probs) / len(current_probs)
+                        keywords_with_scores.append((keyword, avg_prob))
 
                 current_tokens = [token_ids[j].item()]
                 current_probs = [prob]
@@ -154,17 +154,18 @@ def _decode_iob_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        max_prob = max(current_probs)
-                        keywords_with_scores.append((keyword, max_prob))
+                        avg_prob = sum(current_probs) / len(current_probs)
+                        keywords_with_scores.append((keyword, avg_prob))
                     current_tokens = []
                     current_probs = []
 
+        # Flush any remaining tokens at the end of the sequence
         if current_tokens:
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                max_prob = max(current_probs)
-                keywords_with_scores.append((keyword, max_prob))
+                avg_prob = sum(current_probs) / len(current_probs)
+                keywords_with_scores.append((keyword, avg_prob))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -219,40 +220,51 @@ def extract_ranked_keyphrases(
         return _decode_iob_keyphrases(predictions, input_ids, attention_mask, tokenizer)
 
 
-def _contains_disallowed_punctuation(keyword: str) -> bool:
-    """Check if keyword contains punctuation other than dash or apostrophe."""
-    return bool(DISALLOWED_PUNCT_PATTERN.search(keyword))
+# Default punctuation characters to filter from keyphrases (dash and apostrophe are allowed).
+_DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+
+_stemmer = PorterStemmer()
 
 
 def aggregate_document_keyphrases(
     ranked_predictions: list[list[tuple[str, float]]],
     doc_ids: list[str],
     doc_rows: list[int],
-    max_keywords: int | None = 10,
+    max_keyphrases: int = 10,
+    max_keyphrase_length: int = 5,
     filter_punctuation: bool = True,
+    disallowed_punctuation: str = _DEFAULT_DISALLOWED_PUNCTUATION,
+    dedup_strategy: str = "stem",
 ) -> dict[tuple[str, int], list[tuple[str, float]]]:
     """Aggregate sentence-level keyphrase predictions to document level.
 
-    Applies the post-processing pipeline from the reference spec:
+    Applies the post-processing pipeline aligned with the legacy TNT-KID
+    evaluation logic:
     1. Aggregate predictions by document
-    2. Filter keyphrases containing punctuation (except dashes and apostrophes)
-    3. Deduplicate by keyword string (case-insensitive)
-    4. Sort by confidence score (descending)
-    5. Cap at max_keywords per document
+    2. Filter keyphrases containing disallowed punctuation (dash and
+       apostrophe are allowed)
+    3. Filter keyphrases with >= max_keyphrase_length words
+    4. Deduplicate (stem-based by default to match legacy, or lowercase)
+    5. Sort by confidence score (descending)
+    6. Cap at max_keyphrases per document
 
     Args:
         ranked_predictions: List of keyphrase lists with confidence scores,
             one per sentence. Each inner list contains (keyword, score) tuples.
         doc_ids: List of document IDs for each sentence.
         doc_rows: List of document row indices for each sentence.
-        max_keywords: Maximum number of keywords to return per document.
-            None = unlimited. Defaults to 10 to match reference spec.
-        filter_punctuation: If True, remove keyphrases containing punctuation
-            (except dashes and apostrophes).
+        max_keyphrases: Maximum number of keyphrases to return per document.
+        max_keyphrase_length: Filter out keyphrases with >= this many words.
+        filter_punctuation: If True, remove keyphrases containing disallowed
+            punctuation characters.
+        disallowed_punctuation: String of punctuation characters to filter.
+            Dash (-) and apostrophe (') are allowed by default.
+        dedup_strategy: "stem" for Porter stemmer-based deduplication (matches
+            legacy TNT-KID behavior), or "lowercase" for simple case folding.
 
     Returns:
         Dict mapping (doc_id, doc_row) -> list of (keyword, score) tuples,
-        sorted by confidence descending, capped at max_keywords.
+        sorted by confidence descending, capped at max_keyphrases.
     """
     # Step 1: Aggregate predictions by document
     doc_to_pred: dict[tuple[str, int], list[tuple[str, float]]] = {}
@@ -263,34 +275,47 @@ def aggregate_document_keyphrases(
         if i < len(ranked_predictions):
             doc_to_pred[key].extend(ranked_predictions[i])
 
-    # Step 2-5: Process each document
+    # Steps 2-6: Process each document
     for key in doc_to_pred:
         predictions = doc_to_pred[key]
 
-        # Step 2: Filter punctuation (except dashes and apostrophes)
+        # Step 2: Filter punctuation (dash and apostrophe are allowed)
         if filter_punctuation:
             predictions = [
                 (kw, score)
                 for kw, score in predictions
-                if kw.strip() and not _contains_disallowed_punctuation(kw)
+                if kw.strip() and not any(p in kw for p in disallowed_punctuation)
             ]
 
-        # Step 3: Deduplicate (case-insensitive) - keep highest score
-        seen: dict[str, tuple[str, float]] = {}  # lowercase_kw -> (original_kw, score)
-        for kw, score in predictions:
-            kw_lower = kw.lower()
-            if kw_lower not in seen or score > seen[kw_lower][1]:
-                seen[kw_lower] = (kw, score)
+        # Step 3: Filter keyphrases that are too long (>= max_keyphrase_length words)
+        predictions = [
+            (kw, score)
+            for kw, score in predictions
+            if len(kw.split()) < max_keyphrase_length
+        ]
 
-        # Step 4: Sort by score descending
+        # Step 4: Deduplicate - stem-based (legacy) or lowercase
+        seen: dict[str, tuple[str, float]] = {}
+        for kw, score in predictions:
+            if dedup_strategy == "stem":
+                # Stem each word to group variants like "machine"/"machines"
+                kw_key = " ".join([_stemmer.stem(w) for w in kw.split()])
+                # Skip keyphrases containing repeated stemmed words
+                if len(kw_key.split()) != len(set(kw_key.split())):
+                    continue
+            else:
+                kw_key = kw.lower()
+
+            # Keep the occurrence with the highest confidence score
+            if kw_key not in seen or score > seen[kw_key][1]:
+                seen[kw_key] = (kw, score)
+
+        # Step 5: Sort by score descending
         deduped = list(seen.values())
         deduped.sort(key=lambda x: x[1], reverse=True)
 
-        # Step 5: Cap at max_keywords
-        if max_keywords is not None:
-            deduped = deduped[:max_keywords]
-
-        doc_to_pred[key] = deduped
+        # Step 6: Cap at max_keyphrases
+        doc_to_pred[key] = deduped[:max_keyphrases]
 
     return doc_to_pred
 
@@ -311,7 +336,7 @@ def predict_keyphrases(
     text: str,
     nlp: spacy.Language | None = None,
     device: torch.device | str | None = None,
-    nr_keywords: int | None = None,
+    nr_keyphrases: int | None = None,
     return_scores: bool = False,
 ) -> list[str] | list[KeyphraseResult]:
     """Extract keyphrases from text using a trained KeyphraseModel.
@@ -320,7 +345,7 @@ def predict_keyphrases(
     1. Sentence segmentation (using spaCy)
     2. Tokenization (using the model's tokenizer)
     3. Model inference
-    4. Keyphrase extraction and deduplication
+    4. Keyphrase extraction, aggregation, and deduplication
 
     Args:
         model: Trained KeyphraseModel.
@@ -328,10 +353,10 @@ def predict_keyphrases(
         nlp: Optional spaCy model for sentence segmentation.
             If None, loads en_core_web_sm on first call (cached for reuse).
         device: Device for inference. If None, uses the device of model parameters.
-        nr_keywords: Maximum number of keywords to return. If None, returns all
-            detected keywords.
+        nr_keyphrases: Maximum number of keyphrases to return. If None, uses
+            the default from evaluation config (typically 10).
         return_scores: If True, returns list of KeyphraseResult with confidence
-            scores. If False, returns list of keyword strings only.
+            scores. If False, returns list of keyphrase strings only.
 
     Returns:
         If return_scores=False: List of unique keyphrase strings sorted by
@@ -342,19 +367,14 @@ def predict_keyphrases(
     Example:
         >>> from keyword_pecker.models import KeyphraseModel, predict_keyphrases
         >>> model = KeyphraseModel.from_pretrained("path/to/checkpoint")
-        >>> # Get keywords only (backward compatible)
         >>> keyphrases = predict_keyphrases(model, "Machine learning is a subset of AI.")
         >>> print(keyphrases)
         ['machine learning', 'ai']
-        >>> # Get keywords with confidence scores
-        >>> results = predict_keyphrases(model, "Machine learning is a subset of AI.",
-        ...                              return_scores=True)
+        >>> results = predict_keyphrases(model, text, return_scores=True)
         >>> for result in results:
         ...     print(f"{result.keyword}: {result.score:.2f}")
         machine learning: 0.95
         ai: 0.87
-        >>> # Limit to top 3 keywords
-        >>> top_3 = predict_keyphrases(model, text, nr_keywords=3, return_scores=True)
     """
     model.eval()
 
@@ -397,14 +417,13 @@ def predict_keyphrases(
     # Aggregate to document level with filtering, deduplication, and capping
     doc_ids = ["doc_0"] * len(sentences)
     doc_rows = [0] * len(sentences)
-    max_kw = nr_keywords if nr_keywords is not None else 10
+    max_kp = nr_keyphrases or 10
 
     doc_results = aggregate_document_keyphrases(
         ranked_keyphrases,
         doc_ids,
         doc_rows,
-        max_keywords=max_kw,
-        filter_punctuation=True,
+        max_keyphrases=max_kp,
     )
 
     sorted_keyphrases = doc_results.get(("doc_0", 0), [])
