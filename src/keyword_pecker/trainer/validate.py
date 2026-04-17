@@ -266,6 +266,11 @@ def evaluate_model(
     global_step: int = 0,
     epoch: int = 0,
     sample_seed: int = 42,
+    max_keyphrases: int = 10,
+    max_keyphrase_length: int = 5,
+    filter_punctuation: bool = True,
+    disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+    dedup_strategy: str = "stem",
 ) -> dict[str, float | list[dict[str, str | int | list[str]]]]:
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
@@ -294,6 +299,14 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
+        max_keyphrases: Maximum number of keyphrases per document (default: 10).
+        max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
+        filter_punctuation: If True, remove keyphrases containing disallowed
+            punctuation characters (default: True).
+        disallowed_punctuation: String of punctuation characters to filter from
+            keyphrases. Dash (-) and apostrophe (') are allowed by default.
+        dedup_strategy: "stem" for Porter stemmer-based deduplication (matches
+            legacy TNT-KID behavior), or "lowercase" for simple case folding.
 
     Returns:
         dict with keys:
@@ -406,8 +419,11 @@ def evaluate_model(
         all_ranked_predictions,
         doc_ids,
         doc_rows,
-        max_keywords=10,
-        filter_punctuation=True,
+        max_keyphrases=max_keyphrases,
+        max_keyphrase_length=max_keyphrase_length,
+        filter_punctuation=filter_punctuation,
+        disallowed_punctuation=disallowed_punctuation,
+        dedup_strategy=dedup_strategy,
     )
 
     # Convert to lists for external eval module (preserve order)
