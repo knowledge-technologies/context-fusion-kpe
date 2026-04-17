@@ -52,6 +52,11 @@ def train(
     early_stopping_metric: str = "val_loss",
     early_stopping_mode: str = "min",
     early_stopping_check_every: int = 0,
+    max_keyphrases: int = 10,
+    max_keyphrase_length: int = 5,
+    filter_punctuation: bool = True,
+    disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+    dedup_strategy: str = "stem",
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -87,6 +92,11 @@ def train(
         early_stopping_metric: Metric name to monitor (e.g., "val_loss", "f1@5").
         early_stopping_mode: "min" for lower-is-better, "max" for higher-is-better.
         early_stopping_check_every: Run validation every N optimizer steps (0 = epoch-only).
+        max_keyphrases: Maximum number of keyphrases per document (default: 10).
+        max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
+        filter_punctuation: If True, remove keyphrases with disallowed punctuation (default: True).
+        disallowed_punctuation: String of punctuation characters to filter (default excludes dash/apostrophe).
+        dedup_strategy: "stem" for Porter stemmer-based dedup, or "lowercase" (default: "stem").
     """
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
@@ -277,6 +287,11 @@ def train(
                             wandb=wandb,
                             global_step=global_step,
                             epoch=epoch + 1,
+                            max_keyphrases=max_keyphrases,
+                            max_keyphrase_length=max_keyphrase_length,
+                            filter_punctuation=filter_punctuation,
+                            disallowed_punctuation=disallowed_punctuation,
+                            dedup_strategy=dedup_strategy,
                         )
                         k_val = k_values[0] if k_values else 5
                         logger.info(
@@ -386,6 +401,11 @@ def train(
                     wandb=wandb,
                     global_step=global_step,
                     epoch=epoch + 1,
+                    max_keyphrases=max_keyphrases,
+                    max_keyphrase_length=max_keyphrase_length,
+                    filter_punctuation=filter_punctuation,
+                    disallowed_punctuation=disallowed_punctuation,
+                    dedup_strategy=dedup_strategy,
                 )
                 k_val = k_values[0] if k_values else 5
                 logger.info(
