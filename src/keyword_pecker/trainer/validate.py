@@ -304,7 +304,10 @@ def evaluate_model(
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters (default: True).
         disallowed_punctuation: String of punctuation characters to filter from
-            keyphrases. Dash (-) and apostrophe (') are allowed by default.
+            keyphrases. Copied from legacy TNT-KID eval code. Only dash (-) is
+            allowed by default. Note: apostrophe (') IS included (filtered),
+            which differs from the TNT-KID paper that says apostrophes should
+            be kept.
         dedup_strategy: "stem" for Porter stemmer-based deduplication (matches
             legacy TNT-KID behavior), or "lowercase" for simple case folding.
 
