@@ -129,7 +129,11 @@ def test_aggregate_document_keyphrases_multi_document():
 
 
 def test_aggregate_document_keyphrases_punctuation_filtering():
-    """Test that keyphrases with disallowed punctuation are filtered out."""
+    """Test that keyphrases with disallowed punctuation are filtered out.
+
+    Note: apostrophe (') IS filtered per legacy TNT-KID code, even though the
+    TNT-KID paper says apostrophes should be kept.
+    """
     predictions = [
         [("machine learning", 0.9), ("data, science", 0.8)],
         [("neural-network", 0.85), ("don't", 0.7)],
@@ -143,7 +147,7 @@ def test_aggregate_document_keyphrases_punctuation_filtering():
     keywords = [kw for kw, _ in result[("doc1", 0)]]
     assert "machine learning" in keywords
     assert "neural-network" in keywords
-    assert "don't" in keywords
+    assert "don't" not in keywords  # apostrophe is filtered per legacy code
     assert "data, science" not in keywords
     assert "test (keyword)" not in keywords
 
@@ -522,10 +526,14 @@ def test_aggregate_document_keyphrases_length_filter():
     assert "a b c" in keywords
 
 
-def test_aggregate_document_keyphrases_dash_and_apostrophe_allowed():
-    """Test that dash and apostrophe are allowed in keyphrases."""
+def test_aggregate_document_keyphrases_dash_allowed_apostrophe_filtered():
+    """Test that dash is allowed but apostrophe is filtered (per legacy TNT-KID code).
+
+    The paper says apostrophes should be kept, but the legacy code filters them.
+    We follow the legacy code for reproducible evaluation.
+    """
     predictions = [[("machine-learning", 0.9), ("don't stop", 0.8)]]
     result = aggregate_document_keyphrases(predictions, ["doc1"], [0])
     keywords = [kw for kw, _ in result[("doc1", 0)]]
     assert "machine-learning" in keywords
-    assert "don't stop" in keywords
+    assert "don't stop" not in keywords
