@@ -16,7 +16,7 @@ training:
   early_stopping_delta: 0.005        # minimum improvement to reset patience counter
   early_stopping_metric: "f1@10"     # metric to monitor
   early_stopping_mode: "max"         # "min" for loss, "max" for F1/accuracy
-  early_stopping_check_every: 1000   # check every 500 steps
+  early_stopping_check_every: 500   # check every 500 steps
 
 evaluation:
   max_keyphrases: 10                     # max keyphrases per document
