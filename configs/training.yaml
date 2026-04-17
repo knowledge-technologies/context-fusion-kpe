@@ -21,7 +21,10 @@ evaluation:
   max_keyphrases: 10                     # max keyphrases per document
   max_keyphrase_length: 5                # filter keyphrases with >= this many words
   filter_punctuation: true               # remove keyphrases containing disallowed punctuation
-  disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[]^_`{|}~"  # dash and apostrophe allowed
+  # Copied from legacy TNT-KID eval code. Only dash (-) is allowed. Note: apostrophe
+  # (') IS included (filtered), which differs from the TNT-KID paper that says
+  # apostrophes should be kept. We keep legacy behavior for reproducible comparisons.
+  disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
   dedup_strategy: "stem"                  # "stem" (legacy) or "lowercase"
   score_method: "average"                 # "average" (legacy) or "max" probability
 
