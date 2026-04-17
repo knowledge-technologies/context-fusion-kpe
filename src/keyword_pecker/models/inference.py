@@ -220,7 +220,11 @@ def extract_ranked_keyphrases(
         return _decode_iob_keyphrases(predictions, input_ids, attention_mask, tokenizer)
 
 
-# Default punctuation characters to filter from keyphrases (dash and apostrophe are allowed).
+# Punctuation characters to disallow in keyphrases.
+# Copied exactly from the legacy TNT-KID eval code (train_and_eval.py line 858).
+# NOTE: This includes apostrophe ('), which contradicts the original TNT-KID paper
+# stating "we remove keyphrases containing punctuation (except dashes and apostrophes)".
+# We keep the legacy behavior as-is for reproducible evaluation comparisons.
 _DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
 
 _stemmer = PorterStemmer()
@@ -241,8 +245,8 @@ def aggregate_document_keyphrases(
     Applies the post-processing pipeline aligned with the legacy TNT-KID
     evaluation logic:
     1. Aggregate predictions by document
-    2. Filter keyphrases containing disallowed punctuation (dash and
-       apostrophe are allowed)
+    2. Filter keyphrases containing disallowed punctuation (only dash is
+       allowed; apostrophe is filtered)
     3. Filter keyphrases with >= max_keyphrase_length words
     4. Deduplicate (stem-based by default to match legacy, or lowercase)
     5. Sort by confidence score (descending)
@@ -258,7 +262,9 @@ def aggregate_document_keyphrases(
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters.
         disallowed_punctuation: String of punctuation characters to filter.
-            Dash (-) and apostrophe (') are allowed by default.
+            Copied from legacy TNT-KID eval code. Only dash (-) is allowed by
+            default. Note: apostrophe (') IS included (filtered), which differs
+            from the TNT-KID paper that says apostrophes should be kept.
         dedup_strategy: "stem" for Porter stemmer-based deduplication (matches
             legacy TNT-KID behavior), or "lowercase" for simple case folding.
 
@@ -279,7 +285,8 @@ def aggregate_document_keyphrases(
     for key in doc_to_pred:
         predictions = doc_to_pred[key]
 
-        # Step 2: Filter punctuation (dash and apostrophe are allowed)
+        # Step 2: Filter punctuation (only dash allowed; apostrophe is filtered,
+        # which differs from the TNT-KID paper but matches legacy code behavior)
         if filter_punctuation:
             predictions = [
                 (kw, score)

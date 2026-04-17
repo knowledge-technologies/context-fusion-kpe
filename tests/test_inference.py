@@ -149,7 +149,7 @@ def test_aggregate_document_keyphrases_punctuation_filtering():
 
 
 def test_aggregate_document_keyphrases_deduplication_case_insensitive():
-    """Test case-insensitive deduplication."""
+    """Test stem-based deduplication groups morphological variants."""
     predictions = [
         [("Machine Learning", 0.9), ("machine learning", 0.95)],
         [("MACHINE LEARNING", 0.8)],
@@ -158,6 +158,7 @@ def test_aggregate_document_keyphrases_deduplication_case_insensitive():
     doc_ids = ["doc1", "doc1", "doc1"]
     doc_rows = [0, 0, 0]
 
+    # Default dedup_strategy="stem" groups stem variants
     result = aggregate_document_keyphrases(predictions, doc_ids, doc_rows)
 
     keywords = [kw for kw, _ in result[("doc1", 0)]]
@@ -165,32 +166,32 @@ def test_aggregate_document_keyphrases_deduplication_case_insensitive():
     ml_result = next(
         (kw, score)
         for kw, score in result[("doc1", 0)]
-        if kw.lower() == "machine learning"
+        if kw.lower().startswith("machine")
     )
     assert ml_result[1] == 0.95
 
 
 def test_aggregate_document_keyphrases_capping():
-    """Test that results are capped at max_keywords."""
+    """Test that results are capped at max_keyphrases."""
     predictions = [[(f"keyword{i}", 0.9 - i * 0.01) for i in range(15)]]
     doc_ids = ["doc1"]
     doc_rows = [0]
 
     result = aggregate_document_keyphrases(
-        predictions, doc_ids, doc_rows, max_keywords=10
+        predictions, doc_ids, doc_rows, max_keyphrases=10
     )
 
     assert len(result[("doc1", 0)]) == 10
 
 
 def test_aggregate_document_keyphrases_no_cap():
-    """Test that max_keywords=None returns all keywords."""
+    """Test that a large max_keyphrases returns all keywords."""
     predictions = [[(f"keyword{i}", 0.9 - i * 0.01) for i in range(15)]]
     doc_ids = ["doc1"]
     doc_rows = [0]
 
     result = aggregate_document_keyphrases(
-        predictions, doc_ids, doc_rows, max_keywords=None
+        predictions, doc_ids, doc_rows, max_keyphrases=100
     )
 
     assert len(result[("doc1", 0)]) == 15
@@ -466,3 +467,65 @@ def test_extract_ranked_keyphrases_auto_detect_iob():
     keyword, score = results[0][0]
     assert "machine" in keyword.lower()
     assert score > 0.5
+
+
+# ============================================================================
+# Tests for legacy-aligned evaluation logic
+# ============================================================================
+
+
+def test_aggregate_document_keyphrases_stem_dedup():
+    """Test that stem-based deduplication groups morphological variants."""
+    # "learning" and "Learning" stem to the same thing
+    predictions = [[("machine learning", 0.9), ("machine Learning", 0.8)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], dedup_strategy="stem"
+    )
+    assert len(result[("doc1", 0)]) == 1
+    assert result[("doc1", 0)][0][0] == "machine learning"
+    assert result[("doc1", 0)][0][1] == 0.9
+
+
+def test_aggregate_document_keyphrases_lowercase_dedup():
+    """Test that lowercase deduplication is case-insensitive."""
+    predictions = [[("Machine Learning", 0.9), ("machine learning", 0.8)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], dedup_strategy="lowercase"
+    )
+    assert len(result[("doc1", 0)]) == 1
+    assert result[("doc1", 0)][0][0] == "Machine Learning"
+    assert result[("doc1", 0)][0][1] == 0.9
+
+
+def test_aggregate_document_keyphrases_repeated_words():
+    """Test that keywords with repeated stemmed words are filtered out."""
+    predictions = [[("machine learning machine", 0.9), ("deep learning", 0.8)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], dedup_strategy="stem"
+    )
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    assert "deep learning" in keywords
+    # "machine learning machine" has repeated stem "machin" so it's filtered
+    assert "machine learning machine" not in keywords
+
+
+def test_aggregate_document_keyphrases_length_filter():
+    """Test that keywords with >= max_keyphrase_length words are filtered out."""
+    predictions = [[("a b c d e", 0.9), ("a b c d", 0.8), ("a b c", 0.7)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], max_keyphrase_length=5
+    )
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    # "a b c d e" has 5 words, which is >= max_keyphrase_length=5, so it's filtered
+    assert "a b c d e" not in keywords
+    assert "a b c d" in keywords
+    assert "a b c" in keywords
+
+
+def test_aggregate_document_keyphrases_dash_and_apostrophe_allowed():
+    """Test that dash and apostrophe are allowed in keyphrases."""
+    predictions = [[("machine-learning", 0.9), ("don't stop", 0.8)]]
+    result = aggregate_document_keyphrases(predictions, ["doc1"], [0])
+    keywords = [kw for kw, _ in result[("doc1", 0)]]
+    assert "machine-learning" in keywords
+    assert "don't stop" in keywords
