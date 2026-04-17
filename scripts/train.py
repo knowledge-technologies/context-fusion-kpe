@@ -190,6 +190,7 @@ def main() -> None:
 
     train_cfg_tmp = load_config("configs/training.yaml")
     wandb_config = train_cfg_tmp.get("wandb", {})
+    eval_cfg = train_cfg_tmp.get("evaluation", {})
 
     # Flatten all hyperparams into one dict for W&B config and training_onfig.json
     if args.from_config:
@@ -200,6 +201,13 @@ def main() -> None:
             **model_config,
             "run_test_eval": not args.no_test_eval,
             "save_weights": args.save_weights,
+            "max_keyphrases": eval_cfg.get("max_keyphrases", 10),
+            "max_keyphrase_length": eval_cfg.get("max_keyphrase_length", 5),
+            "filter_punctuation": eval_cfg.get("filter_punctuation", True),
+            "disallowed_punctuation": eval_cfg.get(
+                "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+            ),
+            "dedup_strategy": eval_cfg.get("dedup_strategy", "stem"),
         }
     else:
         hyperparams: dict = {
@@ -224,6 +232,11 @@ def main() -> None:
             **model_config,
             "run_test_eval": not args.no_test_eval,
             "save_weights": args.save_weights,
+            "max_keyphrases": 10,
+            "max_keyphrase_length": 5,
+            "filter_punctuation": True,
+            "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+            "dedup_strategy": "stem",
         }
 
     device = torch.device(hyperparams["device"])
@@ -285,6 +298,11 @@ def main() -> None:
             early_stopping_metric=hyperparams.get("early_stopping_metric", "val_loss"),
             early_stopping_mode=hyperparams.get("early_stopping_mode", "min"),
             early_stopping_check_every=hyperparams.get("early_stopping_check_every", 0),
+            max_keyphrases=hyperparams["max_keyphrases"],
+            max_keyphrase_length=hyperparams["max_keyphrase_length"],
+            filter_punctuation=hyperparams["filter_punctuation"],
+            disallowed_punctuation=hyperparams["disallowed_punctuation"],
+            dedup_strategy=hyperparams["dedup_strategy"],
         )
 
         # Final evaluation on the test split
@@ -305,6 +323,11 @@ def main() -> None:
                 wandb=wandb,
                 global_step=0,
                 epoch=hyperparams["epochs"],
+                max_keyphrases=hyperparams["max_keyphrases"],
+                max_keyphrase_length=hyperparams["max_keyphrase_length"],
+                filter_punctuation=hyperparams["filter_punctuation"],
+                disallowed_punctuation=hyperparams["disallowed_punctuation"],
+                dedup_strategy=hyperparams["dedup_strategy"],
             )
             k_val = hyperparams.get("k_values", [5])[0]
             logger.info(
