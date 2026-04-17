@@ -1,4 +1,5 @@
 training:
+  seed: 42                              # random seed for reproducibility
   epochs: 5
   outer_batch_size: 100              # sentences per gradient accumulation unit
   inner_batch_size: 50               # sentences per forward pass
@@ -13,7 +14,7 @@ training:
   k_values: [5, 10, "N", "M"]        # k values for @k metrics (N = num gold, M = num pred)
   early_stopping_patience: 5         # 0 = disabled, N = stop after N epochs without improvement
   early_stopping_delta: 0.01         # minimum improvement to reset patience counter
-  early_stopping_metric: "f1@N"      # metric to monitor
+  early_stopping_metric: "f1@10"      # metric to monitor
   early_stopping_mode: "max"         # "min" for loss, "max" for F1/accuracy
   early_stopping_check_every: 500    # check every 500 steps
 
