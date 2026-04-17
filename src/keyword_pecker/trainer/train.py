@@ -21,7 +21,7 @@ from keyword_pecker.data import compute_class_weights, create_keyphrase_dataload
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer.early_stopping import EarlyStopping
 from keyword_pecker.trainer.validate import evaluate_model
-from keyword_pecker.utils import get_logger
+from keyword_pecker.utils import get_logger, set_random_seeds
 
 logger = get_logger("train")
 
@@ -58,6 +58,7 @@ def train(
     filter_punctuation: bool = True,
     disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
     dedup_strategy: str = "stem",
+    seed: int = 42,
 ) -> None:
     """Full training routine: optimizer, loss, dataloader creation, and epoch loop.
 
@@ -98,7 +99,11 @@ def train(
         filter_punctuation: If True, remove keyphrases with disallowed punctuation (default: True).
         disallowed_punctuation: String of punctuation characters to filter (default excludes dash/apostrophe).
         dedup_strategy: "stem" for Porter stemmer-based dedup, or "lowercase" (default: "stem").
+        seed: Random seed for reproducibility (default: 42). Set to None to disable seeding.
     """
+    if seed is not None:
+        set_random_seeds(seed)
+
     optimizer = torch.optim.AdamW(
         model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
     )
