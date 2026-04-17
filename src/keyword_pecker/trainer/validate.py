@@ -268,6 +268,7 @@ def evaluate_model(
     sample_seed: int = 42,
     max_keyphrases: int = 10,
     max_keyphrase_length: int = 5,
+    score_method: str = "average",
     filter_punctuation: bool = True,
     disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
     dedup_strategy: str = "stem",
@@ -301,6 +302,7 @@ def evaluate_model(
             for non-reproducible sampling.
         max_keyphrases: Maximum number of keyphrases per document (default: 10).
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
+        score_method: How to aggregate token-specific probabilities within the keyphrase ("avarage" or "max")
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters (default: True).
         disallowed_punctuation: String of punctuation characters to filter from
@@ -395,6 +397,7 @@ def evaluate_model(
                 input_ids.cpu(),
                 attention_mask.cpu(),
                 model.tokenizer,
+                score_method=score_method,
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 

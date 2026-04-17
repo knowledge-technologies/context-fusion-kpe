@@ -27,6 +27,7 @@ def _decode_binary_keyphrases(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
+    score_method: str = "average",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from binary predictions using sigmoid + threshold.
 
@@ -67,8 +68,12 @@ def _decode_binary_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        avg_prob = sum(current_probs) / len(current_probs)
-                        keywords_with_scores.append((keyword, avg_prob))
+                        prob_score = _score_keyphrase(
+                            probs=current_probs, method=score_method
+                        )
+
+                        keywords_with_scores.append((keyword, prob_score))
+
                     current_tokens = []
                     current_probs = []
 
@@ -77,8 +82,8 @@ def _decode_binary_keyphrases(
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                avg_prob = sum(current_probs) / len(current_probs)
-                keywords_with_scores.append((keyword, avg_prob))
+                kw_score = _score_keyphrase(probs=current_probs, method=score_method)
+                keywords_with_scores.append((keyword, kw_score))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -99,6 +104,7 @@ def _decode_iob_keyphrases(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
+    score_method: str = "average",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from IOB predictions using argmax + B/I/O decoding.
 
@@ -138,8 +144,10 @@ def _decode_iob_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        avg_prob = sum(current_probs) / len(current_probs)
-                        keywords_with_scores.append((keyword, avg_prob))
+                        prob_score = _score_keyphrase(
+                            probs=current_probs, method=score_method
+                        )
+                        keywords_with_scores.append((keyword, prob_score))
 
                 current_tokens = [token_ids[j].item()]
                 current_probs = [prob]
@@ -154,8 +162,11 @@ def _decode_iob_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        avg_prob = sum(current_probs) / len(current_probs)
-                        keywords_with_scores.append((keyword, avg_prob))
+                        prob_score = _score_keyphrase(
+                            probs=current_probs, method=score_method
+                        )
+
+                        keywords_with_scores.append((keyword, prob_score))
                     current_tokens = []
                     current_probs = []
 
@@ -164,8 +175,8 @@ def _decode_iob_keyphrases(
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                avg_prob = sum(current_probs) / len(current_probs)
-                keywords_with_scores.append((keyword, avg_prob))
+                prob_score = _score_keyphrase(probs=current_probs, method=score_method)
+                keywords_with_scores.append((keyword, prob_score))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
@@ -187,6 +198,7 @@ def extract_ranked_keyphrases(
     attention_mask: torch.Tensor,
     tokenizer,
     num_classes: int | None = None,
+    score_method: str = "average",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases ranked by model confidence.
 
@@ -214,10 +226,16 @@ def extract_ranked_keyphrases(
 
     if num_classes == 2:
         return _decode_binary_keyphrases(
-            predictions, input_ids, attention_mask, tokenizer
+            predictions,
+            input_ids,
+            attention_mask,
+            tokenizer,
+            score_method,
         )
     else:
-        return _decode_iob_keyphrases(predictions, input_ids, attention_mask, tokenizer)
+        return _decode_iob_keyphrases(
+            predictions, input_ids, attention_mask, tokenizer, score_method
+        )
 
 
 # Punctuation characters to disallow in keyphrases.
@@ -228,6 +246,22 @@ def extract_ranked_keyphrases(
 _DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
 
 _stemmer = PorterStemmer()
+
+
+def _score_keyphrase(probs: list[float], method: str = "average") -> float:
+    """Score a keyphrase from its token-level probabilities.
+
+    Args:
+        probs: Token-level probabilities for the keyphrase.
+        method: "average" (legacy TNT-KID: mean of token probs) or
+            "max" (highest single token prob).
+
+    Returns:
+        Scalar confidence score for the keyphrase.
+    """
+    if method == "max":
+        return max(probs)
+    return sum(probs) / len(probs)
 
 
 def aggregate_document_keyphrases(
@@ -344,6 +378,7 @@ def predict_keyphrases(
     nlp: spacy.Language | None = None,
     device: torch.device | str | None = None,
     nr_keyphrases: int | None = None,
+    score_method: str = "average",
     return_scores: bool = False,
 ) -> list[str] | list[KeyphraseResult]:
     """Extract keyphrases from text using a trained KeyphraseModel.
@@ -419,6 +454,7 @@ def predict_keyphrases(
         attention_mask,
         model.tokenizer,
         num_classes=model.refinement_head.num_classes,
+        score_method=score_method,
     )
 
     # Aggregate to document level with filtering, deduplication, and capping
