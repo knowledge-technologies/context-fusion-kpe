@@ -37,6 +37,7 @@ def train(
     head_lr: float,
     num_classes: int = 3,
     class_weights: list[float] | None = None,
+    class_frequencies: list[float] | None = None,
     log_every: int,
     device: torch.device,
     metrics_filename: Path,
@@ -79,6 +80,8 @@ def train(
         num_classes: Number of output classes (2 for binary, 3 for IOB).
         class_weights: Optional class weights for loss function. If None, computed
             from training data for IOB scheme, or defaults to [1.0, 5.0] for binary.
+        class_frequencies: Optional class frequencies (percentages). If None, computed
+            from training data alongside class weights.
         log_every: Print loss every this many optimizer steps.
         device: Device to run on.
         metrics_filename: Path to the JSONL file where metrics are appended.
@@ -134,7 +137,11 @@ def train(
     else:
         # IOB classification: CrossEntropyLoss with class weights
         if class_weights is None:
-            class_weights = compute_class_weights(train_df, num_classes)
+            class_weights, class_frequencies = compute_class_weights(
+                train_df, num_classes
+            )
+        else:
+            class_frequencies = None
         class_weights_tensor = torch.tensor(
             class_weights, dtype=torch.float32, device=device
         )
@@ -332,6 +339,7 @@ def train(
                                         if num_classes == 3
                                         else "binary",
                                         "class_weights": class_weights,
+                                        "class_frequencies": class_frequencies,
                                     },
                                 }
                                 torch.save(checkpoint, run_dir / "model.pt")
@@ -446,6 +454,7 @@ def train(
                                     "num_classes": num_classes,
                                     "scheme": "IOB" if num_classes == 3 else "binary",
                                     "class_weights": class_weights,
+                                    "class_frequencies": class_frequencies,
                                 },
                             }
                             torch.save(checkpoint, run_dir / "model.pt")
@@ -459,6 +468,7 @@ def train(
                     "num_classes": num_classes,
                     "scheme": "IOB" if num_classes == 3 else "binary",
                     "class_weights": class_weights,
+                    "class_frequencies": class_frequencies,
                 },
             }
             torch.save(checkpoint, run_dir / "model.pt")

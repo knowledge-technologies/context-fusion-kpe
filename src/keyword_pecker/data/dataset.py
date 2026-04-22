@@ -261,18 +261,25 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
     }
 
 
-def compute_class_weights(df: pl.DataFrame, num_classes: int = 3) -> list[float]:
-    """Compute balanced class weights from keyword_mask column.
+def compute_class_weights(
+    df: pl.DataFrame, num_classes: int = 3
+) -> tuple[list[float], list[float]]:
+    """Compute balanced class weights and class frequencies from keyword_mask column.
 
     Balanced weights are inversely proportional to class frequency:
         weight[c] = n_samples / (n_classes * n_samples_per_class[c])
+
+    Class frequencies are the percentage of total samples belonging to each class:
+        freq[c] = n_samples_per_class[c] / n_samples * 100
 
     Args:
         df: Polars DataFrame with keyword_mask column
         num_classes: Number of classes (2 for binary, 3 for IOB)
 
     Returns:
-        List of class weights [weight_0, weight_1, ...]
+        Tuple of (class_weights, class_frequencies) where:
+            - class_weights: List of balanced weights [weight_0, weight_1, ...]
+            - class_frequencies: List of percentages [freq_0, freq_1, ...]
     """
     import numpy as np
 
@@ -287,7 +294,9 @@ def compute_class_weights(df: pl.DataFrame, num_classes: int = 3) -> list[float]
     weights = n_samples / (num_classes * class_counts)
     weights = np.where(class_counts == 0, 0.0, weights)
 
-    return weights.tolist()
+    frequencies = (class_counts / n_samples * 100).tolist()
+
+    return weights.tolist(), frequencies
 
 
 def create_keyphrase_dataloader(

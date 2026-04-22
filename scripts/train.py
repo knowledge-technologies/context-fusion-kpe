@@ -268,9 +268,11 @@ def main() -> None:
 
     # Compute class weights from training data (used for loss weighting)
     num_classes = hyperparams["num_classes"]
-    class_weights = compute_class_weights(train_df, num_classes)
+    class_weights, class_frequencies = compute_class_weights(train_df, num_classes)
     hyperparams["class_weights"] = class_weights
+    hyperparams["class_frequencies"] = class_frequencies
     logger.info(f"Class weights (from train split): {class_weights}")
+    logger.info(f"Class frequencies (from train split): {class_frequencies}")
 
     try:
         train(
@@ -283,6 +285,7 @@ def main() -> None:
             head_lr=hyperparams["head_lr"],
             num_classes=hyperparams["num_classes"],
             class_weights=hyperparams["class_weights"],
+            class_frequencies=hyperparams["class_frequencies"],
             warmup_ratio=hyperparams["warmup_ratio"],
             log_every=hyperparams["log_every"],
             device=device,
