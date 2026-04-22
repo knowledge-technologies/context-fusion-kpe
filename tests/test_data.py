@@ -17,6 +17,10 @@ def test_compute_class_weights():
     CLASS_2_EXP_WEIGHT = N_SAMPLES / (N_CLASSES * CLASS_2_SAMPLES)
     CLASS_3_EXP_WEIGHT = N_SAMPLES / (N_CLASSES * CLASS_3_SAMPLES)
 
+    CLASS_1_EXP_FREQ = CLASS_1_SAMPLES / N_SAMPLES * 100
+    CLASS_2_EXP_FREQ = CLASS_2_SAMPLES / N_SAMPLES * 100
+    CLASS_3_EXP_FREQ = CLASS_3_SAMPLES / N_SAMPLES * 100
+
     # input array
     test_record = {
         "keyword_mask": [
@@ -28,8 +32,12 @@ def test_compute_class_weights():
 
     test_df = pl.DataFrame(test_record)
 
-    weights = compute_class_weights(df=test_df, num_classes=N_CLASSES)
+    weights, frequencies = compute_class_weights(df=test_df, num_classes=N_CLASSES)
 
     assert_approx_equal(weights[0], CLASS_1_EXP_WEIGHT, significant=3)
     assert_approx_equal(weights[1], CLASS_2_EXP_WEIGHT, significant=3)
     assert_approx_equal(weights[2], CLASS_3_EXP_WEIGHT, significant=3)
+
+    assert_approx_equal(frequencies[0], CLASS_1_EXP_FREQ, significant=3)
+    assert_approx_equal(frequencies[1], CLASS_2_EXP_FREQ, significant=3)
+    assert_approx_equal(frequencies[2], CLASS_3_EXP_FREQ, significant=3)
