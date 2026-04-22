@@ -107,10 +107,12 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(config["tokenizer"]["model_name"])
     stemmer = PorterStemmer()
     device = config["processing"]["device"]
+    match_mode = config.get("matching", {}).get("match_mode", "stem_equality")
 
     logger.info(f"spaCy model: {config['segmentation']['spacy_model']}")
     logger.info(f"Tokenizer: {config['tokenizer']['model_name']}")
     logger.info(f"Device: {device}")
+    logger.info(f"Match mode: {match_mode}")
 
     # Get dataset paths
     dataset_path = get_dataset_path(args.dataset)
@@ -177,6 +179,7 @@ def main() -> None:
             limit=args.limit,
             device=device,
             show_progress=True,
+            match_mode=match_mode,
         )
 
         # Write to Parquet
@@ -207,6 +210,7 @@ def main() -> None:
             "config": config,
             "scheme": scheme,
             "num_classes": num_classes,
+            "match_mode": match_mode,
             "limit": args.limit,
             "stats": {
                 "total_documents": total_documents,

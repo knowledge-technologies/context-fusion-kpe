@@ -21,10 +21,9 @@ segmentation:
   n_process: 32
 
 # Keyword matching configuration
+# match_mode options: "stem_equality" (recommended) or "stem_regex"
 matching:
-  use_stemming: true
-  stemmer: "porter"
-  case_sensitive: false
+  match_mode: "stem_equality"
 
 # Preprocessing scheme
 preprocessing:
