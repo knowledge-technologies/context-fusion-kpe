@@ -1,5 +1,41 @@
-from keyword_pecker.data import build_keyword_regex, create_keyword_mask
+import numpy as np
+import regex
+
+from keyword_pecker.data import (
+    build_keyword_regex,
+    create_keyword_mask,
+    resolve_keyword_spans_stem,
+)
 from nltk.stem.porter import PorterStemmer
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_offsets(sentence: str) -> tuple[np.ndarray, int]:
+    """Build a fake tokenizer offset array from a sentence.
+
+    Treats each ``\\b\\w+\\b`` word as a single token, surrounded by BOS/EOS
+    sentinel entries (both [0, 0]), matching the shape that HuggingFace
+    tokenizers return.
+
+    Returns:
+        offsets: np.ndarray of shape [num_tokens + 2, 2] (includes BOS/EOS).
+        num_total_tokens: len(offsets), i.e. the value passed to
+            resolve_keyword_spans_stem as num_total_tokens.
+    """
+    word_matches = list(regex.finditer(r"\b\w+\b", sentence))
+    # BOS sentinel
+    spans = [[0, 0]]
+    for m in word_matches:
+        spans.append([m.start(), m.end()])
+    # EOS sentinel
+    spans.append([0, 0])
+    offsets = np.array(spans, dtype=np.int64)
+    return offsets, len(offsets)
+
 
 ABSTRACT = (
     "In this paper, we present a new method of estimating the novelty of rules "
@@ -135,3 +171,151 @@ def test_create_keyword_mask_iob_detailed():
         scheme="IOB",
     )
     assert all(kw_mask_none == 0)
+
+
+# ---------------------------------------------------------------------------
+# resolve_keyword_spans_stem tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_keyword_spans_stem_exact_match():
+    """Keyword present verbatim in sentence is matched."""
+    sentence = "novelty and semantic distance are key concepts"
+    keywords = ["novelty", "semantic distance"]
+    stemmer = PorterStemmer()
+    offsets, n = _make_offsets(sentence)
+
+    kwds, ranges = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+
+    assert "novelty" in kwds
+    assert "semantic distance" in kwds
+    assert len(ranges) == 2
+
+
+def test_resolve_keyword_spans_stem_inflected_forms():
+    """Inflected forms of keywords (e.g. plurals, past tense) are matched.
+
+    This is the core regression that the exact-word regex approach fails:
+    keyword "machine learning" should match "machines learning" and
+    keyword "aid" should match "aided".
+    """
+    stemmer = PorterStemmer()
+
+    # Single-word inflection: "aided" matches keyword "aid"
+    sentence = "the program aided researchers"
+    keywords = ["aid"]
+    offsets, n = _make_offsets(sentence)
+    kwds, ranges = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+    assert len(kwds) == 1, f"Expected 'aided' to match keyword 'aid', got: {kwds}"
+    assert ranges[0][1] > ranges[0][0]
+
+    # Multi-word: "machines learning" matches keyword "machine learning"
+    sentence2 = "machines learning techniques are powerful"
+    keywords2 = ["machine learning"]
+    offsets2, n2 = _make_offsets(sentence2)
+    kwds2, ranges2 = resolve_keyword_spans_stem(
+        sentence2, offsets2, n2, keywords2, stemmer
+    )
+    assert len(kwds2) == 1, (
+        f"Expected 'machines learning' to match 'machine learning', got: {kwds2}"
+    )
+
+
+def test_resolve_keyword_spans_stem_no_false_positive_ai_aims():
+    """Keyword 'ai' must NOT match 'aims'.
+
+    stem('aims') == 'aim' != 'ai' == stem('ai'), so stem-equality
+    correctly rejects the match. This is the failure mode of the
+    stem-prefix regex approach \\bai\\w*\\b.
+    """
+    stemmer = PorterStemmer()
+    sentence = "an ambitious exhibition aims to prove that ai can help"
+
+    # Use only "ai" as a keyword — "aims" in the sentence should not be matched
+    keywords_ai_only = ["ai"]
+    offsets, n = _make_offsets(sentence)
+    kwds, ranges = resolve_keyword_spans_stem(
+        sentence, offsets, n, keywords_ai_only, stemmer
+    )
+
+    # "aims" appears in the sentence but stem("aims")="aim" != stem("ai")="ai"
+    assert not any("aims" in s for s in kwds), (
+        f"'aims' should not be matched by keyword 'ai', but got: {kwds}"
+    )
+    # "ai" itself should be matched
+    assert any(s.strip() == "ai" for s in kwds), (
+        f"'ai' should be matched but got: {kwds}"
+    )
+
+
+def test_resolve_keyword_spans_stem_no_false_positive_substring():
+    """Keyword matching must not match inside a longer word.
+
+    Keyword 'ai' should not match 'cocktails' (where 'ai' is a substring).
+    """
+    stemmer = PorterStemmer()
+    sentence = "a mechanical arm serves cocktails"
+    keywords = ["ai"]
+    offsets, n = _make_offsets(sentence)
+    kwds, _ = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+    assert kwds == [], f"Expected no matches, got: {kwds}"
+
+
+def test_resolve_keyword_spans_stem_token_ranges_correct():
+    """Token index ranges returned must cover exactly the right tokens.
+
+    Sentence: "the machine learning model"
+    Words/tokens (1-indexed after BOS):
+      1: the
+      2: machine
+      3: learning
+      4: model
+    Keyword "machine learning" should map to token range (2, 4)  [start incl, end excl].
+    """
+    stemmer = PorterStemmer()
+    sentence = "the machine learning model"
+    keywords = ["machine learning"]
+    offsets, n = _make_offsets(sentence)
+    kwds, ranges = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+
+    assert len(ranges) == 1
+    start_tok, end_tok = ranges[0]
+    # token 1 = "the", token 2 = "machine", token 3 = "learning", token 4 = "model"
+    # BOS is at index 0, so "machine" is token index 2, "learning" is 3 → range (2, 4)
+    assert start_tok == 2, f"Expected start_tok=2, got {start_tok}"
+    assert end_tok == 4, f"Expected end_tok=4, got {end_tok}"
+
+
+def test_resolve_keyword_spans_stem_overlapping_skipped():
+    """When two keywords overlap, the longer one wins and the shorter is skipped."""
+    stemmer = PorterStemmer()
+    # "semantic distance" (2 words) and "semantic" (1 word) both match;
+    # longest-first ordering means "semantic distance" is tried first and wins.
+    sentence = "we measure semantic distance between concepts"
+    keywords = ["semantic", "semantic distance"]
+    offsets, n = _make_offsets(sentence)
+    kwds, ranges = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+
+    # Only one of the two should be matched (no overlap)
+    assert len(kwds) == 1
+    assert kwds[0] == "semantic distance"
+
+
+def test_resolve_keyword_spans_stem_multiword_inflected():
+    """Multi-word keyword with inflected words matches in sentence.
+
+    Keyword "knowledge hierarchy" vs sentence containing "knowledge hierarchies".
+    stem("hierarchies") == stem("hierarchy") == "hiearchi" (Porter).
+    """
+    stemmer = PorterStemmer()
+    # Confirm stems match (documents the assumption)
+    assert stemmer.stem("hierarchies") == stemmer.stem("hierarchy")
+
+    sentence = "we study knowledge hierarchies in ontologies"
+    keywords = ["knowledge hierarchy"]
+    offsets, n = _make_offsets(sentence)
+    kwds, ranges = resolve_keyword_spans_stem(sentence, offsets, n, keywords, stemmer)
+
+    assert len(kwds) == 1, (
+        f"Expected 'knowledge hierarchies' to match keyword 'knowledge hierarchy', got: {kwds}"
+    )
