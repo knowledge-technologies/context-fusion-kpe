@@ -15,7 +15,7 @@ All functions are stateless and accept their dependencies as arguments.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -169,14 +169,6 @@ def resolve_keyword_spans(
     """
     kwds, word_token_slice_ixs = [], []
 
-    # token_boundaries is an array with 1 on places where a new token
-    # begins. we will take a cumulative sum such that all array
-    # positions map to the index of the corresponding token. we ignore
-    # first/last offset because it relates to <BOS>/<EOS> tokens and
-    # offset does not map to it (ie. both start and end are 0; and
-    # first word again starts with zero). initial array starts with 1,
-    # and that is fine as word vectors also start from index 1 (after
-    # <BOS>)
     last_token_ends_at = offsets[num_total_tokens - 2, 1]
     token_boundaries = np.zeros(len(sentence) + 1, dtype=np.int64)
     token_boundaries[offsets[1:-1, 0]] = 1
@@ -190,38 +182,13 @@ def resolve_keyword_spans(
         assert w_end == m.end()
 
         if covered_spans[w_start:w_end].sum() > 0:
-            # this is an unfortunate case where keywords share
-            # some words. for this case we first find the longest
-            # match
-            #
-            # TODO - overlapping keywords (text contains 'medical
-            # knowledge flow barriers', while keywords are
-            # 'medical knowledge' and 'knowledge flow barriers')
-            #
-            # - we can generate contextual embeddings and do a
-            # meshgrid of those embeddings (meshgrid(embs,
-            # embs)). each item of this grid is categorized as a
-            # span containing the keyword or not. most of the word
-            # to adapt it is in preprocessing. we can store spans
-            # (start_tok_idx:int, end_tok_idx:int) to db and only
-            # construct the target array after the inference
-            #
             continue
 
         if w_end > last_token_ends_at:
-            # if word ends after this point, the sentence was
-            # truncated and we can only skip the rest
             break
 
-        # word is in slice [w_start, w_end>
         kwds.append(w_string)
 
-        # we subtract 1 from w_end as this w_end is a slice (w_start,
-        # w_end), real position ends at w_end-1.
-        #
-        # we add one to final token_boundary because we are again
-        # creating a slice, and slice of size 1 should start at i and
-        # end on i+1. without it it would be (i, i)
         assert sentence[w_start:w_end] == w_string, (
             sentence[w_start:w_end],
             w_string,
@@ -233,6 +200,113 @@ def resolve_keyword_spans(
             )
         )
         covered_spans[w_start:w_end] = 1
+
+    return kwds, word_token_slice_ixs
+
+
+def resolve_keyword_spans_stem(
+    sentence: str,
+    offsets: np.ndarray,
+    num_total_tokens: int,
+    keywords: list[str],
+    stemmer: PorterStemmer,
+) -> tuple[list[str], list[tuple[int, int]]]:
+    """Resolve keyword spans using stem-equality matching (legacy gold-standard approach).
+
+    Instead of regex matching, this function uses word-level stem equality:
+    for each position in the document, it checks whether the stems of the
+    document words match the stems of the keyword words exactly. This is the
+    same algorithm used in the legacy preprocessing.py tokenize_doc function.
+
+    The key advantage over regex is symmetry: stem("aims") == "aim" which is
+    not equal to stem("ai") == "ai", so keyword "ai" will NOT match "aims".
+    A stem-prefix regex \\b{stem}\\w*\\b would incorrectly match "aims" for
+    keyword "ai" because "aims" starts with "ai".
+
+    Character offsets from the matched word spans are looked up in the same
+    token_boundaries array as resolve_keyword_spans, so the token index
+    mapping is identical.
+
+    Args:
+        sentence: Lowercased sentence text.
+        offsets: Token offset mapping from tokenizer (shape: [seq_len, 2]).
+        num_total_tokens: Number of tokens (excluding padding).
+        keywords: List of keyword phrases (lowercased).
+        stemmer: Porter stemmer instance.
+
+    Returns:
+        Tuple of (matched_keywords, token_ranges):
+        - matched_keywords: List of keyword strings found in sentence.
+        - token_ranges: List of (start_tok, end_tok) tuples.
+
+    Note:
+        Handles overlapping keywords by skipping subsequent matches.
+        Handles truncation by stopping when keyword extends beyond tokens.
+    """
+    kwds, word_token_slice_ixs = [], []
+
+    # Build token_boundaries array (identical to resolve_keyword_spans)
+    last_token_ends_at = offsets[num_total_tokens - 2, 1]
+    token_boundaries = np.zeros(len(sentence) + 1, dtype=np.int64)
+    token_boundaries[offsets[1:-1, 0]] = 1
+    token_boundaries = np.cumsum(token_boundaries)
+
+    covered_spans = np.zeros(len(sentence) + 1)
+
+    # Extract word spans from sentence with their character positions.
+    # \b\w+\b ensures we match complete words only (same word-boundary
+    # semantics as the legacy word_tokenize approach, without NLTK dependency).
+    word_spans: list[tuple[str, int, int]] = [
+        (m.group(0), m.start(), m.end()) for m in regex.finditer(r"\b\w+\b", sentence)
+    ]
+    stemmed_doc_words = [stemmer.stem(w) for w, _, _ in word_spans]
+
+    # Pre-stem all keyword phrases once
+    stemmed_keywords: list[list[str]] = [
+        [stemmer.stem(w) for w in kw.split()] for kw in keywords
+    ]
+
+    n_words = len(word_spans)
+
+    # Sort by keyword length descending (longest-first), same priority as
+    # the regex approach, to prefer longer matches over shorter overlapping ones
+    kw_order = sorted(
+        range(len(keywords)),
+        key=lambda i: len(stemmed_keywords[i]),
+        reverse=True,
+    )
+
+    for kw_idx in kw_order:
+        stemmed_kw = stemmed_keywords[kw_idx]
+        kw_len = len(stemmed_kw)
+
+        for j in range(n_words - kw_len + 1):
+            # Stem-equality check: every word in the keyword must match
+            if any(stemmed_doc_words[j + k] != stemmed_kw[k] for k in range(kw_len)):
+                continue
+
+            # Found a stem-equal match; get character span
+            _, char_start, _ = word_spans[j]
+            _, _, char_end = word_spans[j + kw_len - 1]
+
+            if covered_spans[char_start:char_end].sum() > 0:
+                # Overlapping with an already-matched keyword; skip
+                continue
+
+            if char_end > last_token_ends_at:
+                # Sentence was truncated; keyword extends beyond tokenized region
+                continue
+
+            # The matched surface form is the original sentence text for the span
+            w_string = sentence[char_start:char_end]
+            kwds.append(w_string)
+            word_token_slice_ixs.append(
+                (
+                    token_boundaries[char_start].item(),
+                    token_boundaries[char_end - 1].item() + 1,
+                )
+            )
+            covered_spans[char_start:char_end] = 1
 
     return kwds, word_token_slice_ixs
 
@@ -447,6 +521,7 @@ def process_document(
     stemmer: PorterStemmer,
     scheme: str = "IOB",
     device: str = "cpu",
+    match_mode: Literal["stem_equality", "stem_regex"] = "stem_equality",
 ) -> list[dict]:
     """Process a single document through the full pipeline.
 
@@ -462,29 +537,46 @@ def process_document(
         scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
             "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device.
+        match_mode: Keyword matching strategy.
+            - "stem_equality" (default): word-level stem equality matching,
+              equivalent to the legacy gold-standard approach. Correctly handles
+              edge cases like keyword "ai" not matching "aims".
+            - "stem_regex": exact word-boundary regex matching via
+              build_keyword_regex / resolve_keyword_spans.
 
     Returns:
         List of processed sentence dictionaries ready for Parquet output.
     """
     processed = []
 
-    # Build keyword regex pattern
-    regex_pattern = build_keyword_regex(keywords, stemmer)
-
     # Tokenize all sentences at once
     tokenized = tokenize_sentences(sentences, tokenizer)
     offset_mapping = tokenized.pop("offset_mapping")
+
+    # Build regex pattern once (only needed for stem_regex mode)
+    regex_pattern = (
+        build_keyword_regex(keywords, stemmer) if match_mode == "stem_regex" else None
+    )
 
     for s_idx, sent in enumerate(sentences):
         sent_tok_len = tokenized.attention_mask[s_idx].sum().item()
 
         # Resolve keywords in this sentence
-        sent_kwds, tok_ranges = resolve_keyword_spans(
-            sent.lower(),
-            offset_mapping[s_idx].numpy(),
-            sent_tok_len,
-            regex_pattern,
-        )
+        if match_mode == "stem_equality":
+            sent_kwds, tok_ranges = resolve_keyword_spans_stem(
+                sent.lower(),
+                offset_mapping[s_idx].numpy(),
+                sent_tok_len,
+                keywords,
+                stemmer,
+            )
+        else:
+            sent_kwds, tok_ranges = resolve_keyword_spans(
+                sent.lower(),
+                offset_mapping[s_idx].numpy(),
+                sent_tok_len,
+                regex_pattern,
+            )
 
         # Create keyword mask
         keyword_mask = create_keyword_mask(tok_ranges, sent_tok_len, scheme, device)
@@ -519,6 +611,7 @@ def process_dataset(
     limit: int | None = None,
     device: str = "cpu",
     show_progress: bool = True,
+    match_mode: Literal["stem_equality", "stem_regex"] = "stem_equality",
 ) -> list[dict]:
     """Process a single JSON file through the full pipeline.
 
@@ -537,6 +630,8 @@ def process_dataset(
         limit: Optional row limit for testing.
         device: Torch device.
         show_progress: Whether to show progress bar.
+        match_mode: Keyword matching strategy, passed through to process_document.
+            See process_document for details.
 
     Returns:
         List of processed sentence dictionaries.
@@ -615,6 +710,7 @@ def process_dataset(
             stemmer=stemmer,
             scheme=scheme,
             device=device,
+            match_mode=match_mode,
         )
         all_processed.extend(doc_processed)
 
