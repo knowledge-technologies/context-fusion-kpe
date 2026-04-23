@@ -268,7 +268,7 @@ def aggregate_document_keyphrases(
     ranked_predictions: list[list[tuple[str, float]]],
     doc_ids: list[str],
     doc_rows: list[int],
-    max_keyphrases: int = 10,
+    max_keyphrases: int | None = 10,
     max_keyphrase_length: int = 5,
     filter_punctuation: bool = True,
     disallowed_punctuation: str = _DEFAULT_DISALLOWED_PUNCTUATION,
@@ -284,7 +284,7 @@ def aggregate_document_keyphrases(
     3. Filter keyphrases with >= max_keyphrase_length words
     4. Deduplicate (stem-based by default to match legacy, or lowercase)
     5. Sort by confidence score (descending)
-    6. Cap at max_keyphrases per document
+    6. Cap at max_keyphrases per document (skip if None)
 
     Args:
         ranked_predictions: List of keyphrase lists with confidence scores,
@@ -292,6 +292,7 @@ def aggregate_document_keyphrases(
         doc_ids: List of document IDs for each sentence.
         doc_rows: List of document row indices for each sentence.
         max_keyphrases: Maximum number of keyphrases to return per document.
+            If None, no cap is applied.
         max_keyphrase_length: Filter out keyphrases with >= this many words.
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters.
@@ -304,7 +305,7 @@ def aggregate_document_keyphrases(
 
     Returns:
         Dict mapping (doc_id, doc_row) -> list of (keyword, score) tuples,
-        sorted by confidence descending, capped at max_keyphrases.
+        sorted by confidence descending, capped at max_keyphrases (if set).
     """
     # Step 1: Aggregate predictions by document
     doc_to_pred: dict[tuple[str, int], list[tuple[str, float]]] = {}
@@ -355,8 +356,11 @@ def aggregate_document_keyphrases(
         deduped = list(seen.values())
         deduped.sort(key=lambda x: x[1], reverse=True)
 
-        # Step 6: Cap at max_keyphrases
-        doc_to_pred[key] = deduped[:max_keyphrases]
+        # Step 6: Cap at max_keyphrases (skip if None)
+        if max_keyphrases is not None:
+            doc_to_pred[key] = deduped[:max_keyphrases]
+        else:
+            doc_to_pred[key] = deduped
 
     return doc_to_pred
 

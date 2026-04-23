@@ -300,7 +300,8 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
-        max_keyphrases: Maximum number of keyphrases per document (default: 10).
+        max_keyphrases: Deprecated. Metrics are now computed on uncapped
+            predictions; @k metrics handle their own cutoff internally.
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
         score_method: How to aggregate token-specific probabilities within the keyphrase ("avarage" or "max")
         filter_punctuation: If True, remove keyphrases containing disallowed
@@ -417,7 +418,7 @@ def evaluate_model(
     # Compute mean loss
     val_loss = total_loss / total_tokens if total_tokens > 0 else 0.0
 
-    # Aggregate predictions to document level with filtering, deduplication, and capping
+    # Aggregate predictions to document level with filtering and deduplication
     doc_ids = val_df["doc_id"].to_list()
     doc_rows = val_df["doc_row"].to_list()
 
@@ -425,7 +426,7 @@ def evaluate_model(
         all_ranked_predictions,
         doc_ids,
         doc_rows,
-        max_keyphrases=max_keyphrases,
+        max_keyphrases=None,
         max_keyphrase_length=max_keyphrase_length,
         filter_punctuation=filter_punctuation,
         disallowed_punctuation=disallowed_punctuation,
