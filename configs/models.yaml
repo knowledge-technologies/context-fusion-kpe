@@ -7,5 +7,5 @@ keyphrase_model:
   dim_feedforward: null
   dropout: 0.1
   max_position_embeddings: 768
-  n_left_ctx: 10   # Max preceding sentences for context (null = all available)
-  n_right_ctx: 10  # Max following sentences for context (null = all available)
+  n_left_ctx: null   # Max preceding sentences for context (null = all available)
+  n_right_ctx: null  # Max following sentences for context (null = all available)
