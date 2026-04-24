@@ -44,6 +44,8 @@ SENTENCE_SCHEMA = {
     "token_ids": pl.List(pl.Int32),
     "attention_mask": pl.List(pl.Int32),
     "keyword_mask": pl.List(pl.Int32),
+    "word_ids": pl.List(pl.Int64),
+    "word_list": pl.List(pl.Utf8),
 }
 
 KEYWORD_MASK_LABELS = {
@@ -549,9 +551,17 @@ def process_document(
     """
     processed = []
 
-    # Tokenize all sentences at once
+    # Tokenize all sentence at once
     tokenized = tokenize_sentences(sentences, tokenizer)
     offset_mapping = tokenized.pop("offset_mapping")
+
+    # Extract word_ids and word_list per sentence
+    word_ids_per_sent = []
+    word_lists_per_sent = []
+    for s_idx in range(len(sentences)):
+        wid_list = tokenized.word_ids(batch_index=s_idx)
+        word_ids_per_sent.append([w if w is not None else -1 for w in wid_list])
+        word_lists_per_sent.append(sentences[s_idx].split())
 
     # Build regex pattern once (only needed for stem_regex mode)
     regex_pattern = (
@@ -594,6 +604,8 @@ def process_document(
                     s_idx, :sent_tok_len
                 ].tolist(),
                 "keyword_mask": keyword_mask.tolist(),
+                "word_ids": word_ids_per_sent[s_idx][:sent_tok_len],
+                "word_list": word_lists_per_sent[s_idx],
             }
         )
 
