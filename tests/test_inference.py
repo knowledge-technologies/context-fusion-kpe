@@ -6,6 +6,7 @@ from transformers import AutoTokenizer
 from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
+    _extract_iob_keywords_word_level,
 )
 
 
@@ -537,3 +538,161 @@ def test_aggregate_document_keyphrases_dash_allowed_apostrophe_filtered():
     keywords = [kw for kw, _ in result[("doc1", 0)]]
     assert "machine-learning" in keywords
     assert "don't stop" not in keywords
+
+
+# ============================================================================
+# Tests for word-level IOB extraction
+# ============================================================================
+
+
+def test_iob_word_level_single_keyword():
+    """Test word-level extraction with multi-subword word, B/I/O transitions."""
+    # Simulate: "machine learning" where "learning" is split into 2 subwords
+    # Token positions: [CLS] ma chine learn ing [SEP] [PAD]
+    # Word IDs:        -1    0     0     1     1    -1    -1
+    # Predictions:      O    B     I     B     I     O     O  (but only first subword of each word matters)
+    # Actually, for word-level: word 0 gets B, word 1 gets I
+    predictions = torch.tensor([1, 2, 2, 2, 2, 0, 0])  # B I I I I O O (all tokens)
+    word_ids = torch.tensor([-1, 0, 0, 1, 1, -1, -1])
+    word_list = ["machine", "learning"]
+    token_probs = torch.tensor([0.0, 0.9, 0.9, 0.8, 0.8, 0.0, 0.0])
+
+    result = _extract_iob_keywords_word_level(
+        predictions, word_ids, word_list, token_probs
+    )
+
+    assert len(result) == 1
+    assert result[0][0] == "machine learning"
+    assert result[0][1] > 0.5
+
+
+def test_iob_word_level_boundary_logic():
+    """Test that O-tag mid-word doesn't terminate keyphrase."""
+    # Simulate: "neural network" where "network" has an O-tag on first subword
+    # but I-tag on second subword — word-level logic should still treat it as one word
+    # Word IDs:       -1   0     0     1     1    -1
+    # Predictions:     O   B     I     O     I     O
+    # At word boundary for word 1: last token before boundary was O (pos 2->3),
+    # but the word itself gets I from the last subword's prediction
+    # Actually the logic checks: at each token, if pred changes at word boundary
+    # For this test: word 0 = B, word 1 = I (because last subword of word 1 is I)
+    # But the boundary check is: word_ids[idx-1] != word_ids[idx]
+    # At idx=3 (first subword of word 1, pred=O): word_ids[2]=0 != word_ids[3]=1
+    #   → O-tag at word boundary terminates current keyphrase
+    # At idx=4 (second subword of word 1, pred=I): word_ids[3]=1 == word_ids[4]=1
+    #   → I-tag NOT at word boundary, so does nothing
+    # This means the O-tag on first subword of "network" DOES terminate the keyphrase
+    # That's actually correct behavior — the model predicted O for that word position
+    # Let me construct a better test: O-tag mid-word where the word is still part of keyphrase
+
+    # Better test: "deep learning" — word "learning" split, first subword I, second O
+    # Word IDs:       -1   0     1     1    -1
+    # Predictions:     O   B     I     O     O
+    # At idx=2 (first subword of word 1, pred=I): word_ids[1]=0 != word_ids[2]=1
+    #   → I-tag at word boundary, appends "learning"
+    # At idx=3 (second subword of word 1, pred=O): word_ids[2]=1 == word_ids[3]=1
+    #   → O-tag NOT at word boundary, does NOT terminate
+    # At end: flush remaining → "deep learning"
+    predictions = torch.tensor([0, 1, 2, 0, 0])
+    word_ids = torch.tensor([-1, 0, 1, 1, -1])
+    word_list = ["deep", "learning"]
+    token_probs = torch.tensor([0.0, 0.9, 0.8, 0.0, 0.0])
+
+    result = _extract_iob_keywords_word_level(
+        predictions, word_ids, word_list, token_probs
+    )
+
+    assert len(result) == 1
+    assert result[0][0] == "deep learning"
+
+
+def test_iob_word_level_deduplication():
+    """Test that word-level extraction deduplicates keywords."""
+    # Same keyword predicted twice
+    predictions = torch.tensor([0, 1, 0, 1, 0])
+    word_ids = torch.tensor([-1, 0, -1, 0, -1])
+    word_list = ["networks"]
+    token_probs = torch.tensor([0.0, 0.9, 0.0, 0.8, 0.0])
+
+    result = _extract_iob_keywords_word_level(
+        predictions, word_ids, word_list, token_probs
+    )
+
+    assert len(result) == 1
+    assert result[0][0] == "networks"
+    assert abs(result[0][1] - 0.9) < 1e-5  # Higher score kept
+
+
+def test_iob_word_level_score_ranking():
+    """Test that results are sorted by score descending."""
+    predictions = torch.tensor([0, 1, 0, 1, 0])
+    word_ids = torch.tensor([-1, 0, -1, 1, -1])
+    word_list = ["neural", "networks"]
+    token_probs = torch.tensor([0.0, 0.7, 0.0, 0.9, 0.0])
+
+    result = _extract_iob_keywords_word_level(
+        predictions, word_ids, word_list, token_probs
+    )
+
+    assert len(result) == 2
+    assert result[0][0] == "networks"  # Higher score first
+    assert result[1][0] == "neural"
+
+
+def test_iob_subword_fallback():
+    """Test backward compatibility when word_ids=None uses subword-level extraction."""
+    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+    text = "machine learning is great"
+    encoded = tokenizer(text, return_tensors="pt")
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
+
+    logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
+    logits[0, 1, 1] = 5.0  # B-tag
+    logits[0, 2, 2] = 5.0  # I-tag
+
+    # Without word_ids → subword fallback
+    results = extract_ranked_keyphrases(
+        logits, input_ids, attention_mask, tokenizer, num_classes=3
+    )
+
+    assert len(results) == 1
+    assert len(results[0]) == 1
+    keyword, score = results[0][0]
+    assert "machine" in keyword.lower()
+    assert score > 0.5
+
+
+def test_extract_ranked_keyphrases_with_word_ids():
+    """Test that word_ids/word_lists are passed through to word-level extraction."""
+    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+    text = "machine learning is great"
+    encoded = tokenizer(text, return_tensors="pt")
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
+
+    # Build word_ids and word_list
+    wid_list = encoded.word_ids(batch_index=0)
+    word_ids = torch.tensor([w if w is not None else -1 for w in wid_list]).unsqueeze(0)
+    word_lists = [text.split()]
+
+    logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
+    # Set B-tag on first subword of "machine", I-tag on first subword of "learning"
+    logits[0, 1, 1] = 5.0
+    logits[0, 2, 2] = 5.0
+
+    results = extract_ranked_keyphrases(
+        logits,
+        input_ids,
+        attention_mask,
+        tokenizer,
+        num_classes=3,
+        word_ids=word_ids,
+        word_lists=word_lists,
+    )
+
+    assert len(results) == 1
+    assert len(results[0]) == 1
+    keyword, score = results[0][0]
+    assert keyword == "machine learning"
+    assert score > 0.5

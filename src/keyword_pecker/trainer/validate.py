@@ -398,7 +398,10 @@ def evaluate_model(
                 input_ids.cpu(),
                 attention_mask.cpu(),
                 model.tokenizer,
+                num_classes=num_classes,
                 score_method=score_method,
+                word_ids=batch.get("word_ids"),
+                word_lists=batch.get("word_lists"),
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 
