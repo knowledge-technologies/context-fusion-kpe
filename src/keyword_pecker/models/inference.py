@@ -99,20 +99,115 @@ def _decode_binary_keyphrases(
     return all_keywords
 
 
+def _extract_iob_keywords_word_level(
+    predictions: torch.Tensor,
+    word_ids: torch.Tensor,
+    word_list: list[str],
+    token_probs: torch.Tensor,
+    score_method: str = "average",
+) -> list[tuple[str, float]]:
+    """Extract keywords using word-boundary logic (matches legacy TNT-KID).
+
+    Unlike subword-level extraction, this function respects word boundaries
+    when starting, continuing, or terminating keyphrase spans. This prevents
+    partial-word keyphrases and handles intra-word O-tags correctly.
+
+    Args:
+        predictions: (seq_len,) tensor of class IDs (0=O, 1=B, 2=I).
+        word_ids: (seq_len,) tensor mapping each token to its word index (-1 for special/padding).
+        word_list: Original words from the sentence, indexed by word_id.
+        token_probs: (seq_len,) tensor of probabilities for the predicted class.
+        score_method: How to aggregate token probs ("average" or "max").
+
+    Returns:
+        List of (keyword, score) tuples, sorted by score descending, deduplicated.
+    """
+    keywords = []
+    keyword_words = []  # Words in the current keyphrase being built
+    keyword_probs = []  # Token probs for the current keyphrase
+
+    for idx in range(len(predictions)):
+        wid = word_ids[idx].item()
+        if wid == -1:
+            # Skip special tokens ([CLS], [SEP]) and padding
+            continue
+
+        pred = predictions[idx].item()
+        prob = token_probs[idx].item()
+
+        if pred == 1:  # B-tag: start of a new keyphrase
+            # Flush any previous keyphrase before starting a new one
+            if keyword_words:
+                kw = " ".join(keyword_words)
+                score = _score_keyphrase(keyword_probs, score_method)
+                keywords.append((kw, score))
+                keyword_words = []
+                keyword_probs = []
+
+            # Only start a new keyphrase at a word boundary
+            # (first token of a word, not a continuation subword)
+            if idx == 0 or word_ids[idx - 1].item() != wid:
+                keyword_words.append(word_list[wid])
+                keyword_probs.append(prob)
+
+        elif pred == 2:  # I-tag: continuation of the current keyphrase
+            # Only append to the current keyphrase at a word boundary
+            # (this prevents adding the same word multiple times for multi-subword tokens)
+            if idx != 0 and word_ids[idx - 1].item() != wid:
+                keyword_words.append(word_list[wid])
+                keyword_probs.append(prob)
+
+        else:  # O-tag: outside any keyphrase
+            # Only terminate the current keyphrase at a word boundary
+            # (this preserves intra-word O-tags without splitting the keyphrase mid-word)
+            if keyword_words and idx != 0 and word_ids[idx - 1].item() != wid:
+                kw = " ".join(keyword_words)
+                score = _score_keyphrase(keyword_probs, score_method)
+                keywords.append((kw, score))
+                keyword_words = []
+                keyword_probs = []
+
+    # Flush any remaining keyphrase at the end of the sequence
+    if keyword_words:
+        kw = " ".join(keyword_words)
+        score = _score_keyphrase(keyword_probs, score_method)
+        keywords.append((kw, score))
+
+    # Sort by score descending, then deduplicate by keyword string
+    keywords.sort(key=lambda x: x[1], reverse=True)
+    seen = set()
+    deduped = []
+    for kw, score in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            deduped.append((kw, score))
+
+    return deduped
+
+
 def _decode_iob_keyphrases(
     predictions: torch.Tensor,
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
     score_method: str = "average",
+    word_ids: torch.Tensor | None = None,
+    word_lists: list[list[str]] | None = None,
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from IOB predictions using argmax + B/I/O decoding.
+
+    When word_ids and word_lists are provided, uses word-boundary logic that
+    matches the legacy TNT-KID extraction. Otherwise falls back to subword-level
+    extraction for backward compatibility.
 
     Args:
         predictions: Model logits of shape (batch_size, max_seq_len, 3).
         input_ids: Token IDs of shape (batch_size, max_seq_len).
         attention_mask: Attention mask of shape (batch_size, max_seq_len).
         tokenizer: HuggingFace tokenizer for decoding tokens.
+        score_method: How to aggregate token probs ("average" or "max").
+        word_ids: Optional (batch_size, max_seq_len) tensor mapping tokens to word indices.
+        word_lists: Optional list of word lists, one per batch item.
 
     Returns:
         List of keyword lists with confidence scores, one per sentence.
@@ -123,71 +218,95 @@ def _decode_iob_keyphrases(
     class_preds = torch.argmax(predictions, dim=-1)
     probs = torch.softmax(predictions, dim=-1)
 
+    # Decide whether to use word-boundary or subword-level extraction
+    use_word_level = word_ids is not None and word_lists is not None
+
     for i in range(batch_size):
         seq_len = attention_mask[i].sum().item()
 
-        token_ids = input_ids[i, 1 : seq_len - 1]
-        token_preds = class_preds[i, 1 : seq_len - 1]
-        token_probs = probs[i, 1 : seq_len - 1]
+        if use_word_level:
+            # Word-boundary extraction: use full sequence, skip special tokens via word_ids == -1
+            token_preds = class_preds[i, :seq_len]
+            token_probs = probs[i, :seq_len]
+            # Gather the probability of the predicted class for each token
+            token_probs_max = token_probs.gather(-1, token_preds.unsqueeze(-1)).squeeze(
+                -1
+            )
+            sentence_keywords = _extract_iob_keywords_word_level(
+                token_preds,
+                word_ids[i, :seq_len],
+                word_lists[i],
+                token_probs_max,
+                score_method,
+            )
+        else:
+            # Fallback: subword-level extraction (backward compatibility)
+            token_ids = input_ids[i, 1 : seq_len - 1]
+            token_preds = class_preds[i, 1 : seq_len - 1]
+            token_probs = probs[i, 1 : seq_len - 1]
 
-        keywords_with_scores: list[tuple[str, float]] = []
+            keywords_with_scores: list[tuple[str, float]] = []
 
-        current_tokens: list[int] = []
-        current_probs: list[float] = []
+            current_tokens: list[int] = []
+            current_probs: list[float] = []
 
-        for j in range(len(token_ids)):
-            pred = token_preds[j].item()
-            prob = token_probs[j, pred].item()
+            for j in range(len(token_ids)):
+                pred = token_preds[j].item()
+                prob = token_probs[j, pred].item()
 
-            if pred == 1:
-                if current_tokens:
-                    decoded = tokenizer.decode(torch.tensor(current_tokens))
-                    keyword = re.sub(r" - ", "-", decoded.strip())
-                    if keyword:
-                        prob_score = _score_keyphrase(
-                            probs=current_probs, method=score_method
-                        )
-                        keywords_with_scores.append((keyword, prob_score))
+                if pred == 1:
+                    if current_tokens:
+                        decoded = tokenizer.decode(torch.tensor(current_tokens))
+                        keyword = re.sub(r" - ", "-", decoded.strip())
+                        if keyword:
+                            prob_score = _score_keyphrase(
+                                probs=current_probs, method=score_method
+                            )
+                            keywords_with_scores.append((keyword, prob_score))
 
-                current_tokens = [token_ids[j].item()]
-                current_probs = [prob]
+                    current_tokens = [token_ids[j].item()]
+                    current_probs = [prob]
 
-            elif pred == 2:
-                if current_tokens:
-                    current_tokens.append(token_ids[j].item())
-                    current_probs.append(prob)
+                elif pred == 2:
+                    if current_tokens:
+                        current_tokens.append(token_ids[j].item())
+                        current_probs.append(prob)
 
-            else:
-                if current_tokens:
-                    decoded = tokenizer.decode(torch.tensor(current_tokens))
-                    keyword = re.sub(r" - ", "-", decoded.strip())
-                    if keyword:
-                        prob_score = _score_keyphrase(
-                            probs=current_probs, method=score_method
-                        )
+                else:
+                    if current_tokens:
+                        decoded = tokenizer.decode(torch.tensor(current_tokens))
+                        keyword = re.sub(r" - ", "-", decoded.strip())
+                        if keyword:
+                            prob_score = _score_keyphrase(
+                                probs=current_probs, method=score_method
+                            )
 
-                        keywords_with_scores.append((keyword, prob_score))
-                    current_tokens = []
-                    current_probs = []
+                            keywords_with_scores.append((keyword, prob_score))
+                        current_tokens = []
+                        current_probs = []
 
-        # Flush any remaining tokens at the end of the sequence
-        if current_tokens:
-            decoded = tokenizer.decode(torch.tensor(current_tokens))
-            keyword = re.sub(r" - ", "-", decoded.strip())
-            if keyword:
-                prob_score = _score_keyphrase(probs=current_probs, method=score_method)
-                keywords_with_scores.append((keyword, prob_score))
+            # Flush any remaining tokens at the end of the sequence
+            if current_tokens:
+                decoded = tokenizer.decode(torch.tensor(current_tokens))
+                keyword = re.sub(r" - ", "-", decoded.strip())
+                if keyword:
+                    prob_score = _score_keyphrase(
+                        probs=current_probs, method=score_method
+                    )
+                    keywords_with_scores.append((keyword, prob_score))
 
-        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+            keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
-        seen: set[str] = set()
-        deduped: list[tuple[str, float]] = []
-        for kw, score in keywords_with_scores:
-            if kw not in seen:
-                seen.add(kw)
-                deduped.append((kw, score))
+            seen: set[str] = set()
+            deduped: list[tuple[str, float]] = []
+            for kw, score in keywords_with_scores:
+                if kw not in seen:
+                    seen.add(kw)
+                    deduped.append((kw, score))
 
-        all_keywords.append(deduped)
+            sentence_keywords = deduped
+
+        all_keywords.append(sentence_keywords)
 
     return all_keywords
 
@@ -199,6 +318,8 @@ def extract_ranked_keyphrases(
     tokenizer,
     num_classes: int | None = None,
     score_method: str = "average",
+    word_ids: torch.Tensor | None = None,
+    word_lists: list[list[str]] | None = None,
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases ranked by model confidence.
 
@@ -215,6 +336,10 @@ def extract_ranked_keyphrases(
         tokenizer: HuggingFace tokenizer for decoding tokens.
         num_classes: Number of output classes. If None, auto-detect from shape.
             2 for binary, 3 for IOB scheme.
+        word_ids: Optional (batch_size, max_seq_len) tensor mapping tokens to word indices.
+            Only used for IOB scheme.
+        word_lists: Optional list of word lists, one per batch item.
+            Only used for IOB scheme.
 
     Returns:
         List of keyword lists with confidence scores, one per sentence.
@@ -234,7 +359,13 @@ def extract_ranked_keyphrases(
         )
     else:
         return _decode_iob_keyphrases(
-            predictions, input_ids, attention_mask, tokenizer, score_method
+            predictions,
+            input_ids,
+            attention_mask,
+            tokenizer,
+            score_method,
+            word_ids=word_ids,
+            word_lists=word_lists,
         )
 
 
@@ -243,7 +374,7 @@ def extract_ranked_keyphrases(
 # NOTE: This includes apostrophe ('), which contradicts the original TNT-KID paper
 # stating "we remove keyphrases containing punctuation (except dashes and apostrophes)".
 # We keep the legacy behavior as-is for reproducible evaluation comparisons.
-_DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+_DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[\\]^_`{|}~"
 
 _stemmer = PorterStemmer()
 
@@ -449,6 +580,20 @@ def predict_keyphrases(
     attention_mask = tokenized["attention_mask"].to(device)
     sentence_counts = [len(sentences)]
 
+    # Compute word_ids and word_lists on-the-fly for word-boundary extraction
+    word_lists = []
+    word_ids_batch = []
+    for s_idx, sent in enumerate(sentences):
+        wid_list = tokenized.word_ids(batch_index=s_idx)
+        word_lists.append(sent.split())
+        word_ids_batch.append([w if w is not None else -1 for w in wid_list])
+
+    # Pad word_ids to match input_ids length
+    max_len = input_ids.shape[1]
+    padded_word_ids = torch.full((len(sentences), max_len), -1, dtype=torch.long)
+    for i, wid_seq in enumerate(word_ids_batch):
+        padded_word_ids[i, : len(wid_seq)] = torch.tensor(wid_seq, dtype=torch.long)
+
     with torch.no_grad():
         logits = model(input_ids, attention_mask, sentence_counts)
 
@@ -459,6 +604,8 @@ def predict_keyphrases(
         model.tokenizer,
         num_classes=model.refinement_head.num_classes,
         score_method=score_method,
+        word_ids=padded_word_ids.to(device),
+        word_lists=word_lists,
     )
 
     # Aggregate to document level with filtering, deduplication, and capping
