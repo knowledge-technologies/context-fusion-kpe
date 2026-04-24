@@ -60,6 +60,8 @@ class KeyphraseDataset(Dataset):
             "token_ids": row["token_ids"],
             "keyword_mask": row["keyword_mask"],
             "keywords": row["keywords"],
+            "word_ids": row.get("word_ids", [-1] * len(row["token_ids"])),
+            "word_list": row.get("word_list", []),
         }
 
 
@@ -216,16 +218,19 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
     input_ids = torch.zeros((num_rows, max_len), dtype=torch.long)
     attention_mask = torch.zeros((num_rows, max_len), dtype=torch.long)
     target = torch.zeros((num_rows, max_len), dtype=torch.long)
+    word_ids = torch.full((num_rows, max_len), -1, dtype=torch.long)
 
     # Fill tensors row by row
     for i, sample in enumerate(batch):
         tokens = sample["token_ids"]
         kw_mask = sample["keyword_mask"]
+        wid_seq = sample["word_ids"]
         seq_len = len(tokens)
 
         input_ids[i, :seq_len] = torch.tensor(tokens, dtype=torch.long)
         attention_mask[i, :seq_len] = 1
         target[i, :seq_len] = torch.tensor(kw_mask, dtype=torch.long)
+        word_ids[i, :seq_len] = torch.tensor(wid_seq, dtype=torch.long)
 
     # Compute sentence_counts from (doc_id, doc_row) groupings
     # This counts consecutive sentences with the same document identity
@@ -249,6 +254,7 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
     doc_ids = [sample["doc_id"] for sample in batch]
     doc_rows = [sample["doc_row"] for sample in batch]
     keywords = [sample["keywords"] for sample in batch]
+    word_lists = [sample["word_list"] for sample in batch]
 
     return {
         "input_ids": input_ids,
@@ -258,6 +264,8 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
         "doc_ids": doc_ids,
         "doc_rows": doc_rows,
         "keywords": keywords,
+        "word_ids": word_ids,
+        "word_lists": word_lists,
     }
 
 
