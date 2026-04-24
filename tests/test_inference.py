@@ -7,6 +7,7 @@ from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
     _extract_iob_keywords_word_level,
+    _score_keyphrase,
 )
 
 
@@ -696,3 +697,48 @@ def test_extract_ranked_keyphrases_with_word_ids():
     keyword, score = results[0][0]
     assert keyword == "machine learning"
     assert score > 0.5
+
+
+# ============================================================================
+# Tests for _score_keyphrase methods
+# ============================================================================
+
+
+def test_score_keyphrase_average():
+    """Test average scoring method."""
+    result = _score_keyphrase([0.9, 0.7, 0.8], method="average")
+    assert abs(result - 0.8) < 1e-6
+
+
+def test_score_keyphrase_max():
+    """Test max scoring method."""
+    result = _score_keyphrase([0.9, 0.7, 0.8], method="max")
+    assert abs(result - 0.9) < 1e-6
+
+
+def test_score_keyphrase_min():
+    """Test min scoring method."""
+    result = _score_keyphrase([0.9, 0.7, 0.8], method="min")
+    assert abs(result - 0.7) < 1e-6
+
+
+def test_score_keyphrase_geometric():
+    """Test geometric mean scoring method."""
+    result = _score_keyphrase([0.9, 0.7, 0.8], method="geometric")
+    expected = (0.9 * 0.7 * 0.8) ** (1 / 3)
+    assert abs(result - expected) < 1e-6
+
+
+def test_score_keyphrase_geometric_penalizes_low():
+    """Test that geometric mean penalizes low-confidence tokens more than average."""
+    probs = [0.95, 0.95, 0.1]
+    avg = _score_keyphrase(probs, method="average")
+    geo = _score_keyphrase(probs, method="geometric")
+    assert geo < avg
+
+
+def test_score_keyphrase_default_is_average():
+    """Test that default method is average."""
+    result = _score_keyphrase([0.6, 0.8])
+    expected = _score_keyphrase([0.6, 0.8], method="average")
+    assert abs(result - expected) < 1e-6

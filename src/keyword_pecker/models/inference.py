@@ -6,6 +6,7 @@ keyphrases from text using a trained KeyphraseModel.
 
 from __future__ import annotations
 
+import math
 import re
 from typing import NamedTuple
 
@@ -116,8 +117,8 @@ def _extract_iob_keywords_word_level(
         predictions: (seq_len,) tensor of class IDs (0=O, 1=B, 2=I).
         word_ids: (seq_len,) tensor mapping each token to its word index (-1 for special/padding).
         word_list: Original words from the sentence, indexed by word_id.
-        token_probs: (seq_len,) tensor of probabilities for the predicted class.
-        score_method: How to aggregate token probs ("average" or "max").
+        token_probs: (seq_len,) tensor of keyword-level probabilities (1 - P(O)).
+        score_method: How to aggregate token probs ("average", "max", "min", or "geometric").
 
     Returns:
         List of (keyword, score) tuples, sorted by score descending, deduplicated.
@@ -205,7 +206,7 @@ def _decode_iob_keyphrases(
         input_ids: Token IDs of shape (batch_size, max_seq_len).
         attention_mask: Attention mask of shape (batch_size, max_seq_len).
         tokenizer: HuggingFace tokenizer for decoding tokens.
-        score_method: How to aggregate token probs ("average" or "max").
+        score_method: How to aggregate token probs ("average", "max", "min", or "geometric").
         word_ids: Optional (batch_size, max_seq_len) tensor mapping tokens to word indices.
         word_lists: Optional list of word lists, one per batch item.
 
@@ -228,15 +229,14 @@ def _decode_iob_keyphrases(
             # Word-boundary extraction: use full sequence, skip special tokens via word_ids == -1
             token_preds = class_preds[i, :seq_len]
             token_probs = probs[i, :seq_len]
-            # Gather the probability of the predicted class for each token
-            token_probs_max = token_probs.gather(-1, token_preds.unsqueeze(-1)).squeeze(
-                -1
-            )
+
+            # Use 1 - P(O) as keyword-level probability (consistent across B/I tags)
+            keyword_probs = 1.0 - token_probs[:, 0]
             sentence_keywords = _extract_iob_keywords_word_level(
                 token_preds,
                 word_ids[i, :seq_len],
                 word_lists[i],
-                token_probs_max,
+                keyword_probs,
                 score_method,
             )
         else:
@@ -252,7 +252,7 @@ def _decode_iob_keyphrases(
 
             for j in range(len(token_ids)):
                 pred = token_preds[j].item()
-                prob = token_probs[j, pred].item()
+                prob = (1.0 - token_probs[j, 0]).item()
 
                 if pred == 1:
                     if current_tokens:
@@ -384,14 +384,21 @@ def _score_keyphrase(probs: list[float], method: str = "average") -> float:
 
     Args:
         probs: Token-level probabilities for the keyphrase.
-        method: "average" (legacy TNT-KID: mean of token probs) or
-            "max" (highest single token prob).
+        method: "average" (mean of token probs),
+            "max" (highest single token prob),
+            "min" (lowest token prob, conservative),
+            "geometric" (geometric mean, penalizes low-confidence tokens).
 
     Returns:
         Scalar confidence score for the keyphrase.
     """
     if method == "max":
         return max(probs)
+    if method == "min":
+        return min(probs)
+    if method == "geometric":
+        log_sum = sum(math.log(p) if p > 0 else float("-inf") for p in probs)
+        return math.exp(log_sum / len(probs))
     return sum(probs) / len(probs)
 
 
