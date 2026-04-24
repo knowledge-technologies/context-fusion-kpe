@@ -47,6 +47,7 @@ def train(
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
     warmup_ratio: float = 0.1,
+    use_scheduler: bool = True,
     k_values: list[int | str] | None = None,
     early_stopping_patience: int = 0,
     early_stopping_delta: float = 0.0,
@@ -91,6 +92,7 @@ def train(
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
         warmup_ratio: Fraction of training steps for warmup (default: 0.1).
+        use_scheduler: Whether to use a learning rate scheduler (default: True).
         k_values: List of k values for @k metrics (default: [5, 10]).
         early_stopping_patience: Checks without improvement before stopping (0 = disabled).
         early_stopping_delta: Minimum improvement to reset patience counter.
@@ -114,14 +116,23 @@ def train(
     total_steps = math.ceil(len(train_df) / outer_batch_size) * epochs
     warmup_steps = int(total_steps * warmup_ratio)
 
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer,
-        num_warmup_steps=warmup_steps,
-        num_training_steps=total_steps,
-    )
-    logger.info(
-        f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
-    )
+    if use_scheduler:
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=total_steps,
+        )
+        logger.info(
+            f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
+        )
+    else:
+        scheduler = None
+        logger.info("LR scheduler: disabled")
+
+    def get_lr() -> float:
+        if scheduler is not None:
+            return float(scheduler.get_last_lr()[0])
+        return float(optimizer.param_groups[0]["lr"])
 
     # Setup loss function based on num_classes
     if num_classes == 2:
@@ -245,7 +256,8 @@ def train(
                 # Note: zero_grad() called AFTER step() to prepare for next accumulation cycle
                 if inner_count == inner_per_outer:
                     optimizer.step()
-                    scheduler.step()
+                    if scheduler is not None:
+                        scheduler.step()
                     optimizer.zero_grad()
 
                     if last_loss is not None:
@@ -260,7 +272,7 @@ def train(
                                 "outer_step": outer_step,
                                 "global_step": global_step,
                                 "train_loss": last_loss,
-                                "learning_rate": scheduler.get_last_lr()[0],
+                                "learning_rate": get_lr(),
                             }
                             metrics_file.write(json.dumps(record) + "\n")
                             metrics_file.flush()
@@ -269,9 +281,7 @@ def train(
                                 wandb.log(
                                     {
                                         "train/loss": last_loss,
-                                        "train/learning_rate": scheduler.get_last_lr()[
-                                            0
-                                        ],
+                                        "train/learning_rate": get_lr(),
                                     },
                                     step=global_step,
                                 )
@@ -355,7 +365,8 @@ def train(
             # Note: outer_step not incremented since this is a partial batch
             if inner_count > 0:
                 optimizer.step()
-                scheduler.step()
+                if scheduler is not None:
+                    scheduler.step()
                 optimizer.zero_grad()
 
                 if last_loss is not None:
@@ -370,7 +381,7 @@ def train(
                             "outer_step": outer_step,
                             "global_step": global_step,
                             "train_loss": last_loss,
-                            "learning_rate": scheduler.get_last_lr()[0],
+                            "learning_rate": get_lr(),
                         }
                         metrics_file.write(json.dumps(record) + "\n")
                         metrics_file.flush()
@@ -379,7 +390,7 @@ def train(
                             wandb.log(
                                 {
                                     "train/loss": last_loss,
-                                    "train/learning_rate": scheduler.get_last_lr()[0],
+                                    "train/learning_rate": get_lr(),
                                 },
                                 step=global_step,
                             )

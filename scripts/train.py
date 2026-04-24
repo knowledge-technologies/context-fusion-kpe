@@ -105,6 +105,12 @@ def parse_args() -> argparse.Namespace:
         help="Fraction of training steps for warmup (default: 0.1)",
     )
     parser.add_argument(
+        "--no-scheduler",
+        action="store_true",
+        default=False,
+        help="Disable learning rate scheduler (default: scheduler enabled)",
+    )
+    parser.add_argument(
         "--log-every",
         type=int,
         default=1000,
@@ -209,6 +215,8 @@ def main() -> None:
             ),
             "dedup_strategy": eval_cfg.get("dedup_strategy", "stem"),
         }
+        if args.no_scheduler:
+            hyperparams["use_scheduler"] = False
     else:
         hyperparams: dict = {
             "dataset": args.dataset,
@@ -220,6 +228,7 @@ def main() -> None:
             "scheme": args.scheme,
             "num_classes": args.num_classes,
             "warmup_ratio": args.warmup_ratio,
+            "use_scheduler": not args.no_scheduler,
             "log_every": args.log_every,
             "device": args.device,
             "val_batch_size": args.val_batch_size,
@@ -287,6 +296,7 @@ def main() -> None:
             class_weights=hyperparams["class_weights"],
             class_frequencies=hyperparams["class_frequencies"],
             warmup_ratio=hyperparams["warmup_ratio"],
+            use_scheduler=hyperparams.get("use_scheduler", True),
             log_every=hyperparams["log_every"],
             device=device,
             metrics_filename=metrics_filename,

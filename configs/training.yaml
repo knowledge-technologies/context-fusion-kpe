@@ -9,6 +9,7 @@ training:
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
   warmup_ratio: 0.1                  # fraction of training steps for warmup
+  use_scheduler: false                # whether to use a learning rate scheduler
   log_every: 500                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
   k_values: [5, 10, "N", "M"]        # k values for @k metrics (N = num gold, M = num pred)
