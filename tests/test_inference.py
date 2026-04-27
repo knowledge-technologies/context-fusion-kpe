@@ -3,6 +3,7 @@
 import torch
 from transformers import AutoTokenizer
 
+from keyword_pecker.data import extract_word_level_data
 from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
@@ -10,14 +11,11 @@ from keyword_pecker.models.inference import (
     _score_keyphrase,
 )
 
-
-def _create_mock_tokenizer():
-    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
-    return tokenizer
+_TOKENIZER = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
 
 
 def test_extract_ranked_keyphrases_single_keyword():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -36,7 +34,7 @@ def test_extract_ranked_keyphrases_single_keyword():
 
 
 def test_extract_ranked_keyphrases_multiple_keywords():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning and deep learning are popular"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -54,7 +52,7 @@ def test_extract_ranked_keyphrases_multiple_keywords():
 
 
 def test_extract_ranked_keyphrases_no_keywords():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "this is a simple sentence"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -69,7 +67,7 @@ def test_extract_ranked_keyphrases_no_keywords():
 
 
 def test_extract_ranked_keyphrases_multiword_keyword():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "natural language processing is useful"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -254,7 +252,7 @@ def test_aggregate_document_keyphrases_no_punctuation_filter():
 
 
 def test_extract_ranked_keyphrases_batch():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     texts = ["machine learning", "deep neural networks"]
     encoded = tokenizer(texts, return_tensors="pt", padding=True)
     input_ids = encoded["input_ids"]
@@ -272,7 +270,7 @@ def test_extract_ranked_keyphrases_batch():
 
 
 def test_extract_ranked_keyphrases_deduplication():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "python python python"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -290,7 +288,7 @@ def test_extract_ranked_keyphrases_deduplication():
 
 
 def test_extract_ranked_keyphrases_keyword_at_boundary():
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "python is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -309,7 +307,7 @@ def test_extract_ranked_keyphrases_keyword_at_boundary():
 
 def test_extract_ranked_keyphrases_iob_single_keyword():
     """Test IOB decoding for a single multi-token keyword."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -332,7 +330,7 @@ def test_extract_ranked_keyphrases_iob_single_keyword():
 
 def test_extract_ranked_keyphrases_iob_multiple_keywords():
     """Test IOB decoding for multiple separate keywords."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning and deep learning are popular"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -358,7 +356,7 @@ def test_extract_ranked_keyphrases_iob_multiple_keywords():
 
 def test_extract_ranked_keyphrases_iob_no_keywords():
     """Test IOB decoding when all tokens are Outside (O)."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "this is a simple sentence"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -377,7 +375,7 @@ def test_extract_ranked_keyphrases_iob_no_keywords():
 
 def test_extract_ranked_keyphrases_iob_orphan_i_tag():
     """Test that orphan I tags (without preceding B) are ignored."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "this is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -396,7 +394,7 @@ def test_extract_ranked_keyphrases_iob_orphan_i_tag():
 
 def test_extract_ranked_keyphrases_iob_single_token_keyword():
     """Test IOB decoding for a single-token keyword (B only, no I)."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "AI is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -418,7 +416,7 @@ def test_extract_ranked_keyphrases_iob_single_token_keyword():
 
 def test_extract_ranked_keyphrases_iob_adjacent_keywords():
     """Test IOB decoding for adjacent keywords (B followed by B)."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "AI machine learning"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -439,7 +437,7 @@ def test_extract_ranked_keyphrases_iob_adjacent_keywords():
 
 def test_extract_ranked_keyphrases_auto_detect_binary():
     """Test auto-detection of binary scheme from 2D logits."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -456,7 +454,7 @@ def test_extract_ranked_keyphrases_auto_detect_binary():
 
 def test_extract_ranked_keyphrases_auto_detect_iob():
     """Test auto-detection of IOB scheme from 3D logits."""
-    tokenizer = _create_mock_tokenizer()
+    tokenizer = _TOKENIZER
     text = "machine learning is great"
     encoded = tokenizer(text, return_tensors="pt")
     input_ids = encoded["input_ids"]
@@ -666,16 +664,14 @@ def test_iob_subword_fallback():
 
 def test_extract_ranked_keyphrases_with_word_ids():
     """Test that word_ids/word_lists are passed through to word-level extraction."""
-    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
     text = "machine learning is great"
-    encoded = tokenizer(text, return_tensors="pt")
+    encoded = _TOKENIZER(text, return_tensors="pt", return_offsets_mapping=True)
     input_ids = encoded["input_ids"]
     attention_mask = encoded["attention_mask"]
 
-    # Build word_ids and word_list
-    wid_list = encoded.word_ids(batch_index=0)
-    word_ids = torch.tensor([w if w is not None else -1 for w in wid_list]).unsqueeze(0)
-    word_lists = [text.split()]
+    # Build word_ids and word_list using the shared helper
+    word_ids_batch, word_lists = extract_word_level_data(encoded, [text])
+    word_ids = torch.tensor(word_ids_batch)
 
     logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
     # Set B-tag on first subword of "machine", I-tag on first subword of "learning"
@@ -686,7 +682,7 @@ def test_extract_ranked_keyphrases_with_word_ids():
         logits,
         input_ids,
         attention_mask,
-        tokenizer,
+        _TOKENIZER,
         num_classes=3,
         word_ids=word_ids,
         word_lists=word_lists,
@@ -696,6 +692,51 @@ def test_extract_ranked_keyphrases_with_word_ids():
     assert len(results[0]) == 1
     keyword, score = results[0][0]
     assert keyword == "machine learning"
+    assert score > 0.5
+
+
+def test_extract_ranked_keyphrases_with_hyphenated_keyword():
+    """Test word-level extraction with hyphenated keyword like 'state-of-the-art'.
+
+    The tokenizer splits hyphens into separate word_ids, so the word_list
+    contains ['state', '-', 'of', '-', 'the', '-', 'art', 'methods'].
+    When all are tagged as part of a keyphrase, the result is space-joined.
+    """
+    text = "state-of-the-art methods are popular"
+    encoded = _TOKENIZER(text, return_tensors="pt", return_offsets_mapping=True)
+    input_ids = encoded["input_ids"]
+    attention_mask = encoded["attention_mask"]
+
+    word_ids_batch, word_lists = extract_word_level_data(encoded, [text])
+    word_ids = torch.tensor(word_ids_batch)
+
+    # Set B-tag on first token (word 0, "state"), I-tags on all tokens
+    # through "methods" (word 7) to form a single keyphrase
+    logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
+    wid_list = encoded.word_ids(batch_index=0)
+    seq_len = attention_mask[0].sum().item()
+    for tok_idx in range(1, seq_len - 1):  # skip [CLS] and [SEP]
+        wid = wid_list[tok_idx]
+        if wid == 0:
+            logits[0, tok_idx, 1] = 5.0  # B-tag on first word
+        elif wid is not None and wid <= 7:
+            logits[0, tok_idx, 2] = 5.0  # I-tag on remaining words
+
+    results = extract_ranked_keyphrases(
+        logits,
+        input_ids,
+        attention_mask,
+        _TOKENIZER,
+        num_classes=3,
+        word_ids=word_ids,
+        word_lists=word_lists,
+    )
+
+    assert len(results) == 1
+    assert len(results[0]) == 1
+    keyword, score = results[0][0]
+    # word_list contains hyphens as separate entries, so result is space-joined
+    assert keyword == "state - of - the - art methods"
     assert score > 0.5
 
 

@@ -1,7 +1,10 @@
 import polars as pl
 from numpy.testing import assert_approx_equal
-from keyword_pecker.data import compute_class_weights
+from transformers import AutoTokenizer
+from keyword_pecker.data import compute_class_weights, extract_word_level_data
 from keyword_pecker.data.dataset import KeyphraseDataset, keyphrase_collate_fn
+
+_TOKENIZER = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
 
 
 def test_compute_class_weights():
@@ -104,3 +107,78 @@ def test_collate_pads_word_ids_with_minus_one():
     # Second row not padded
     assert result["word_ids"][1, 4].item() == -1  # original -1 at end
     assert result["word_lists"] == [["hello", "world"], ["a", "b", "c"]]
+
+
+def test_extract_word_level_data_simple_and_indexing():
+    """Verify word_list content and that word_ids are sequential 0..N-1."""
+    sentences = ["machine learning is great"]
+    tokenized = _TOKENIZER(sentences, return_tensors="pt", return_offsets_mapping=True)
+
+    word_ids, word_lists = extract_word_level_data(tokenized, sentences)
+
+    assert len(word_ids) == 1
+    assert len(word_lists) == 1
+    assert word_lists[0] == ["machine", "learning", "is", "great"]
+    assert word_ids[0][0] == -1  # [CLS]
+    assert word_ids[0][-1] == -1  # [SEP]
+
+    # Verify word_ids are sequential and index into word_list correctly
+    unique_wids = [w for w in word_ids[0] if w >= 0]
+    assert unique_wids == [0, 1, 2, 3]
+    for wid in unique_wids:
+        assert word_lists[0][wid] == ["machine", "learning", "is", "great"][wid]
+
+
+def test_extract_word_level_data_hyphenated_and_punctuation():
+    """Verify word_list handles hyphenated words and punctuation with separate word_ids."""
+    sentences = ["state-of-the-art methods", "hello, world!"]
+    tokenized = _TOKENIZER(
+        sentences, return_tensors="pt", return_offsets_mapping=True, padding=True
+    )
+
+    word_ids, word_lists = extract_word_level_data(tokenized, sentences)
+
+    # "state-of-the-art methods" — tokenizer assigns separate word_ids to each component
+    max_wid_0 = max(w for w in word_ids[0] if w != -1)
+    assert len(word_lists[0]) == max_wid_0 + 1
+    assert "state" in word_lists[0]
+    assert "art" in word_lists[0]
+    assert "methods" in word_lists[0]
+    # Verify every word_id is indexable
+    for wid in [w for w in word_ids[0] if w >= 0]:
+        _ = word_lists[0][wid]
+
+    # "hello, world!" — punctuation gets its own word_ids
+    max_wid_1 = max(w for w in word_ids[1] if w != -1)
+    assert len(word_lists[1]) == max_wid_1 + 1
+    for wid in [w for w in word_ids[1] if w >= 0]:
+        _ = word_lists[1][wid]
+
+
+def test_extract_word_level_data_batch():
+    """Verify batch processing: both elements correctly indexed from 0 independently."""
+    sentences = ["hello world", "foo-bar baz"]
+    tokenized = _TOKENIZER(
+        sentences, return_tensors="pt", return_offsets_mapping=True, padding=True
+    )
+
+    word_ids, word_lists = extract_word_level_data(tokenized, sentences)
+
+    assert len(word_ids) == 2
+    assert len(word_lists) == 2
+
+    # First sentence: "hello world" → word_ids 0, 1
+    assert word_lists[0] == ["hello", "world"]
+    unique_wids_0 = [w for w in word_ids[0] if w >= 0]
+    assert unique_wids_0 == [0, 1]
+    assert word_lists[0][0] == "hello"
+    assert word_lists[0][1] == "world"
+
+    # Second sentence: "foo-bar baz" → word_ids 0..3 (hyphen splits, "baz" subwords share word_id 3)
+    max_wid_1 = max(w for w in word_ids[1] if w != -1)
+    assert max_wid_1 > 1  # hyphenated word creates extra word_ids
+    assert len(word_lists[1]) == max_wid_1 + 1
+    # All word_ids should be in range [0, max_wid_1]
+    assert all(0 <= w <= max_wid_1 for w in word_ids[1] if w != -1)
+    for wid in range(max_wid_1 + 1):
+        _ = word_lists[1][wid]
