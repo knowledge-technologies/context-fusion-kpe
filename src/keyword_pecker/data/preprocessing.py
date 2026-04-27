@@ -25,6 +25,7 @@ import torch
 from nltk.stem.porter import PorterStemmer
 from tqdm import tqdm
 from transformers import AutoTokenizer
+from transformers.tokenization_utils_base import BatchEncoding
 
 from keyword_pecker.utils import get_logger
 
@@ -318,6 +319,46 @@ def resolve_keyword_spans_stem(
 # ============================================================================
 
 
+def extract_word_level_data(
+    batch_tokenized: BatchEncoding,
+    batch_sentence_strings: list[str],
+) -> tuple[list[list[int]], list[list[str]]]:
+    """Extract word_ids and word_lists from a tokenized batch.
+
+    Builds word_lists from offset_mapping (not sentence.split()) to handle
+    tokenizers that assign separate word_ids to punctuation or hyphens.
+    E.g. "state-of-the-art" gets 8 word_ids but split() gives 1 element.
+
+    Args:
+        batch_tokenized: Tokenizer output (BatchEncoding) with word_ids()
+            and offset_mapping available.
+        batch_sentence_strings: Original sentence texts, one per batch item.
+
+    Returns:
+        Tuple of (word_ids_per_sent, word_lists_per_sent):
+        - word_ids_per_sent: List of word_id lists, one per sentence.
+          Each list maps tokens to word indices (-1 for special/padding).
+        - word_lists_per_sent: List of word lists, one per sentence.
+          Each list is indexed by word_id.
+    """
+    word_ids_per_sent = []
+    word_lists_per_sent = []
+
+    for s_idx in range(len(batch_sentence_strings)):
+        wid_list = batch_tokenized.word_ids(batch_index=s_idx)
+        word_ids_per_sent.append([w if w is not None else -1 for w in wid_list])
+
+        offsets = batch_tokenized["offset_mapping"][s_idx]
+        word_map: dict[int, str] = {}
+        for tok_idx, wid in enumerate(wid_list):
+            if wid is not None and wid not in word_map:
+                char_start, char_end = offsets[tok_idx]
+                word_map[wid] = batch_sentence_strings[s_idx][char_start:char_end]
+        word_lists_per_sent.append([word_map[i] for i in range(len(word_map))])
+
+    return word_ids_per_sent, word_lists_per_sent
+
+
 def tokenize_sentences(
     sentences: list[str],
     tokenizer: AutoTokenizer,
@@ -551,17 +592,15 @@ def process_document(
     """
     processed = []
 
-    # Tokenize all sentence at once
+    # Tokenize all sentences at once
     tokenized = tokenize_sentences(sentences, tokenizer)
-    offset_mapping = tokenized.pop("offset_mapping")
 
-    # Extract word_ids and word_list per sentence
-    word_ids_per_sent = []
-    word_lists_per_sent = []
-    for s_idx in range(len(sentences)):
-        wid_list = tokenized.word_ids(batch_index=s_idx)
-        word_ids_per_sent.append([w if w is not None else -1 for w in wid_list])
-        word_lists_per_sent.append(sentences[s_idx].split())
+    # Extract word_ids and word_lists using tokenizer word boundaries
+    word_ids_per_sent, word_lists_per_sent = extract_word_level_data(
+        tokenized, sentences
+    )
+
+    offset_mapping = tokenized.pop("offset_mapping")
 
     # Build regex pattern once (only needed for stem_regex mode)
     regex_pattern = (

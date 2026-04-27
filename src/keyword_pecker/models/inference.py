@@ -14,7 +14,7 @@ import spacy
 import torch
 from nltk.stem.porter import PorterStemmer
 
-from keyword_pecker.data import load_spacy_model
+from keyword_pecker.data import extract_word_level_data, load_spacy_model
 from .keyphrase_model import KeyphraseModel
 
 
@@ -579,6 +579,7 @@ def predict_keyphrases(
     tokenized = model.tokenizer(
         sentences,
         return_tensors="pt",
+        return_offsets_mapping=True,
         truncation=True,
         padding=True,
     )
@@ -587,13 +588,8 @@ def predict_keyphrases(
     attention_mask = tokenized["attention_mask"].to(device)
     sentence_counts = [len(sentences)]
 
-    # Compute word_ids and word_lists on-the-fly for word-boundary extraction
-    word_lists = []
-    word_ids_batch = []
-    for s_idx, sent in enumerate(sentences):
-        wid_list = tokenized.word_ids(batch_index=s_idx)
-        word_lists.append(sent.split())
-        word_ids_batch.append([w if w is not None else -1 for w in wid_list])
+    # Compute word_ids and word_lists using tokenizer word boundaries
+    word_ids_batch, word_lists = extract_word_level_data(tokenized, sentences)
 
     # Pad word_ids to match input_ids length
     max_len = input_ids.shape[1]
