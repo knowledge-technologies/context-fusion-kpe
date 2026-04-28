@@ -577,6 +577,23 @@ def test_iob_word_level_score_ranking():
     assert result[1][0] == "neural"
 
 
+def test_iob_word_level_eager_method():
+    """Test that results are sorted eagerly by occurrence."""
+    predictions = torch.tensor([0, 1, 0, 1, 0, 1])
+    word_ids = torch.tensor([-1, 0, -1, 1, -1, 2])
+    word_list = ["neural", "networks", "machines"]
+    token_probs = torch.tensor([0.0, 0.7, 0.0, 0.9, 0.0, 0.8])
+
+    result = _extract_iob_keywords_word_level(
+        predictions, word_ids, word_list, token_probs, score_method="eager"
+    )
+
+    assert len(result) == 3
+    assert result[0][0] == "neural"  # lower score, but it appeared first
+    assert result[1][0] == "networks"
+    assert result[2][0] == "machines"
+
+
 def test_iob_subword_fallback():
     """Test backward compatibility when word_ids=None uses subword-level extraction."""
     tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
