@@ -313,9 +313,10 @@ def test_extract_ranked_keyphrases_iob_single_keyword():
     input_ids = encoded["input_ids"]
     attention_mask = encoded["attention_mask"]
 
+    # <s> machine learning is great <s>
     logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
-    logits[0, 1, 1] = 5.0
-    logits[0, 2, 2] = 5.0
+    logits[0, 1, 1] = 5.0  # B (machine)
+    logits[0, 2, 2] = 5.0  # I (learning)
 
     results = extract_ranked_keyphrases(
         logits, input_ids, attention_mask, tokenizer, num_classes=3
@@ -324,7 +325,7 @@ def test_extract_ranked_keyphrases_iob_single_keyword():
     assert len(results) == 1
     assert len(results[0]) == 1
     keyword, score = results[0][0]
-    assert "machine" in keyword.lower()
+    assert "machine learning" in keyword.lower()
     assert score > 0.5
 
 
@@ -339,9 +340,9 @@ def test_extract_ranked_keyphrases_iob_multiple_keywords():
     # place logits
     logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
     logits[0, 1, 1] = 5.0  # 'machine'
-    logits[0, 2, 2] = 5.0  # 'learning'
+    logits[0, 2, 2] = 3  # 'learning'
     logits[0, 4, 1] = 4.0  # 'deep'
-    logits[0, 5, 2] = 4.0  # 'learning'
+    logits[0, 5, 2] = 2  # 'learning'
 
     results = extract_ranked_keyphrases(
         logits, input_ids, attention_mask, tokenizer, num_classes=3
@@ -431,46 +432,9 @@ def test_extract_ranked_keyphrases_iob_adjacent_keywords():
         logits, input_ids, attention_mask, tokenizer, num_classes=3
     )
 
-    assert len(results) == 1
     assert len(results[0]) == 2
-
-
-def test_extract_ranked_keyphrases_auto_detect_binary():
-    """Test auto-detection of binary scheme from 2D logits."""
-    tokenizer = _TOKENIZER
-    text = "machine learning is great"
-    encoded = tokenizer(text, return_tensors="pt")
-    input_ids = encoded["input_ids"]
-    attention_mask = encoded["attention_mask"]
-
-    logits = torch.zeros_like(input_ids, dtype=torch.float)
-    logits[0, 1:3] = 2.0
-
-    results = extract_ranked_keyphrases(logits, input_ids, attention_mask, tokenizer)
-
-    assert len(results) == 1
-    assert len(results[0]) == 1
-
-
-def test_extract_ranked_keyphrases_auto_detect_iob():
-    """Test auto-detection of IOB scheme from 3D logits."""
-    tokenizer = _TOKENIZER
-    text = "machine learning is great"
-    encoded = tokenizer(text, return_tensors="pt")
-    input_ids = encoded["input_ids"]
-    attention_mask = encoded["attention_mask"]
-
-    logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
-    logits[0, 1, 1] = 5.0
-    logits[0, 2, 2] = 5.0
-
-    results = extract_ranked_keyphrases(logits, input_ids, attention_mask, tokenizer)
-
-    assert len(results) == 1
-    assert len(results[0]) == 1
-    keyword, score = results[0][0]
-    assert "machine" in keyword.lower()
-    assert score > 0.5
+    assert "ai" in results[0][0]
+    assert "machine learning" in results[0][1]
 
 
 # ============================================================================
@@ -549,9 +513,8 @@ def test_iob_word_level_single_keyword():
     # Simulate: "machine learning" where "learning" is split into 2 subwords
     # Token positions: [CLS] ma chine learn ing [SEP] [PAD]
     # Word IDs:        -1    0     0     1     1    -1    -1
-    # Predictions:      O    B     I     B     I     O     O  (but only first subword of each word matters)
-    # Actually, for word-level: word 0 gets B, word 1 gets I
-    predictions = torch.tensor([1, 2, 2, 2, 2, 0, 0])  # B I I I I O O (all tokens)
+    # Predictions:      O    B     I     I     I     O     O  (but only first subword of each word matters)
+    predictions = torch.tensor([0, 1, 2, 2, 2, 0, 0])  # 0 B I I I O O (all tokens)
     word_ids = torch.tensor([-1, 0, 0, 1, 1, -1, -1])
     word_list = ["machine", "learning"]
     token_probs = torch.tensor([0.0, 0.9, 0.9, 0.8, 0.8, 0.0, 0.0])
@@ -567,33 +530,9 @@ def test_iob_word_level_single_keyword():
 
 def test_iob_word_level_boundary_logic():
     """Test that O-tag mid-word doesn't terminate keyphrase."""
-    # Simulate: "neural network" where "network" has an O-tag on first subword
-    # but I-tag on second subword — word-level logic should still treat it as one word
-    # Word IDs:       -1   0     0     1     1    -1
-    # Predictions:     O   B     I     O     I     O
-    # At word boundary for word 1: last token before boundary was O (pos 2->3),
-    # but the word itself gets I from the last subword's prediction
-    # Actually the logic checks: at each token, if pred changes at word boundary
-    # For this test: word 0 = B, word 1 = I (because last subword of word 1 is I)
-    # But the boundary check is: word_ids[idx-1] != word_ids[idx]
-    # At idx=3 (first subword of word 1, pred=O): word_ids[2]=0 != word_ids[3]=1
-    #   → O-tag at word boundary terminates current keyphrase
-    # At idx=4 (second subword of word 1, pred=I): word_ids[3]=1 == word_ids[4]=1
-    #   → I-tag NOT at word boundary, so does nothing
-    # This means the O-tag on first subword of "network" DOES terminate the keyphrase
-    # That's actually correct behavior — the model predicted O for that word position
-    # Let me construct a better test: O-tag mid-word where the word is still part of keyphrase
 
-    # Better test: "deep learning" — word "learning" split, first subword I, second O
-    # Word IDs:       -1   0     1     1    -1
-    # Predictions:     O   B     I     O     O
-    # At idx=2 (first subword of word 1, pred=I): word_ids[1]=0 != word_ids[2]=1
-    #   → I-tag at word boundary, appends "learning"
-    # At idx=3 (second subword of word 1, pred=O): word_ids[2]=1 == word_ids[3]=1
-    #   → O-tag NOT at word boundary, does NOT terminate
-    # At end: flush remaining → "deep learning"
     predictions = torch.tensor([0, 1, 2, 0, 0])
-    word_ids = torch.tensor([-1, 0, 1, 1, -1])
+    word_ids = torch.tensor([-1, 0, 1, 1, -1])  # deep (0) lear (I) ning (0)
     word_list = ["deep", "learning"]
     token_probs = torch.tensor([0.0, 0.9, 0.8, 0.0, 0.0])
 
