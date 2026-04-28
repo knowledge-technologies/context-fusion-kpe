@@ -71,7 +71,7 @@ def _decode_binary_keyphrases(
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
                         if score_method == "eager":
-                            prob_score = float(keyword_order)
+                            prob_score = -float(keyword_order)
                             keyword_order += 1
                         else:
                             prob_score = _score_keyphrase(
@@ -89,7 +89,7 @@ def _decode_binary_keyphrases(
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
                 if score_method == "eager":
-                    kw_score = float(keyword_order)
+                    kw_score = -float(keyword_order)
                 else:
                     kw_score = _score_keyphrase(
                         probs=current_probs, method=score_method
@@ -153,7 +153,7 @@ def _extract_iob_keywords_word_level(
             if keyword_words:
                 kw = " ".join(keyword_words)
                 if score_method == "eager":
-                    score = float(keyword_order)
+                    score = -float(keyword_order)
                     keyword_order += 1
                 else:
                     score = _score_keyphrase(keyword_probs, score_method)
@@ -180,7 +180,7 @@ def _extract_iob_keywords_word_level(
             if keyword_words and idx != 0 and word_ids[idx - 1].item() != wid:
                 kw = " ".join(keyword_words)
                 if score_method == "eager":
-                    score = float(keyword_order)
+                    score = -float(keyword_order)
                     keyword_order += 1
                 else:
                     score = _score_keyphrase(keyword_probs, score_method)
@@ -192,7 +192,7 @@ def _extract_iob_keywords_word_level(
     if keyword_words:
         kw = " ".join(keyword_words)
         if score_method == "eager":
-            score = float(keyword_order)
+            score = -float(keyword_order)
         else:
             score = _score_keyphrase(keyword_probs, score_method)
         keywords.append((kw, score))
@@ -284,7 +284,7 @@ def _decode_iob_keyphrases(
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
                             if score_method == "eager":
-                                prob_score = float(keyword_order)
+                                prob_score = -float(keyword_order)
                                 keyword_order += 1
                             else:
                                 prob_score = _score_keyphrase(
@@ -306,7 +306,7 @@ def _decode_iob_keyphrases(
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
                             if score_method == "eager":
-                                prob_score = float(keyword_order)
+                                prob_score = -float(keyword_order)
                                 keyword_order += 1
                             else:
                                 prob_score = _score_keyphrase(
@@ -323,7 +323,7 @@ def _decode_iob_keyphrases(
                 keyword = re.sub(r" - ", "-", decoded.strip())
                 if keyword:
                     if score_method == "eager":
-                        prob_score = float(keyword_order)
+                        prob_score = -float(keyword_order)
                     else:
                         prob_score = _score_keyphrase(
                             probs=current_probs, method=score_method
