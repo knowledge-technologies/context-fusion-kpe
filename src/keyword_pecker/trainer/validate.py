@@ -257,6 +257,7 @@ def evaluate_model(
     *,
     batch_size: int,
     num_classes: int = 3,
+    use_class_weights: bool = True,
     class_weights: list[float] | None = None,
     device: torch.device,
     split: str = "val",
@@ -286,8 +287,10 @@ def evaluate_model(
             token_ids, keyword_mask], sorted by (doc_id, doc_row, sent_num).
         batch_size: Number of sentences per forward pass.
         num_classes: Number of output classes (2 for binary, 3 for IOB).
-        class_weights: Class weights for loss function. Required for IOB scheme;
-            defaults to [1.0, 5.0] for binary scheme.
+        use_class_weights: Whether to apply class weights in loss function.
+            If False, uses equal weighting (CrossEntropyLoss with weight=None).
+        class_weights: Class weights for loss function. Required for IOB scheme
+            when use_class_weights=True; defaults to [1.0, 5.0] for binary scheme.
         device: Device to run inference on.
         split: Dataset split label used for metric key prefixes and logging,
             e.g. ``"val"`` or ``"test"`` (default: ``"val"``).
@@ -303,7 +306,7 @@ def evaluate_model(
         max_keyphrases: Deprecated. Metrics are now computed on uncapped
             predictions; @k metrics handle their own cutoff internally.
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
-        score_method: How to aggregate token-specific probabilities within the keyphrase ("avarage" or "max")
+        score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "eager", etc.)
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters (default: True).
         disallowed_punctuation: String of punctuation characters to filter from
@@ -347,13 +350,19 @@ def evaluate_model(
             pos_weight=torch.tensor([[pos_weight]], device=device),
         )
     else:
-        class_weights_tensor = torch.tensor(
-            class_weights, dtype=torch.float32, device=device
-        )
-        loss_fn = torch.nn.CrossEntropyLoss(
-            weight=class_weights_tensor,
-            reduction="none",
-        )
+        if use_class_weights and class_weights is not None:
+            class_weights_tensor = torch.tensor(
+                class_weights, dtype=torch.float32, device=device
+            )
+            loss_fn = torch.nn.CrossEntropyLoss(
+                weight=class_weights_tensor,
+                reduction="none",
+            )
+        else:
+            loss_fn = torch.nn.CrossEntropyLoss(
+                weight=None,
+                reduction="none",
+            )
 
     total_loss = 0.0
     total_tokens = 0

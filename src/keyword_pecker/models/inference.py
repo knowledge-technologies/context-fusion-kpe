@@ -53,6 +53,7 @@ def _decode_binary_keyphrases(
         token_probs = probs[i, 1 : seq_len - 1]
 
         keywords_with_scores: list[tuple[str, float]] = []
+        keyword_order = 0
 
         current_tokens: list[int] = []
         current_probs: list[float] = []
@@ -69,9 +70,13 @@ def _decode_binary_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        prob_score = _score_keyphrase(
-                            probs=current_probs, method=score_method
-                        )
+                        if score_method == "eager":
+                            prob_score = float(keyword_order)
+                            keyword_order += 1
+                        else:
+                            prob_score = _score_keyphrase(
+                                probs=current_probs, method=score_method
+                            )
 
                         keywords_with_scores.append((keyword, prob_score))
 
@@ -83,7 +88,12 @@ def _decode_binary_keyphrases(
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                kw_score = _score_keyphrase(probs=current_probs, method=score_method)
+                if score_method == "eager":
+                    kw_score = float(keyword_order)
+                else:
+                    kw_score = _score_keyphrase(
+                        probs=current_probs, method=score_method
+                    )
                 keywords_with_scores.append((keyword, kw_score))
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
@@ -118,14 +128,15 @@ def _extract_iob_keywords_word_level(
         word_ids: (seq_len,) tensor mapping each token to its word index (-1 for special/padding).
         word_list: Original words from the sentence, indexed by word_id.
         token_probs: (seq_len,) tensor of keyword-level probabilities (1 - P(O)).
-        score_method: How to aggregate token probs ("average", "max", "min", or "geometric").
+        score_method: How to aggregate token probs ("average", "max", "min", "geometric", or "eager").
 
     Returns:
-        List of (keyword, score) tuples, sorted by score descending, deduplicated.
+        List of (keyword, score) tuples. For "eager", scores are based on order of appearance.
     """
     keywords = []
     keyword_words = []  # Words in the current keyphrase being built
     keyword_probs = []  # Token probs for the current keyphrase
+    keyword_order = 0  # Track order of appearance for "eager" scoring
 
     for idx in range(len(predictions)):
         wid = word_ids[idx].item()
@@ -137,10 +148,15 @@ def _extract_iob_keywords_word_level(
         prob = token_probs[idx].item()
 
         if pred == 1:  # B-tag: start of a new keyphrase
-            # Flush any previous keyphrase before starting a new one
+            # At start of a new keyphrase (B), score any
+            # current keyphrase, store it, then empty the slot
             if keyword_words:
                 kw = " ".join(keyword_words)
-                score = _score_keyphrase(keyword_probs, score_method)
+                if score_method == "eager":
+                    score = float(keyword_order)
+                    keyword_order += 1
+                else:
+                    score = _score_keyphrase(keyword_probs, score_method)
                 keywords.append((kw, score))
                 keyword_words = []
                 keyword_probs = []
@@ -163,7 +179,11 @@ def _extract_iob_keywords_word_level(
             # (this preserves intra-word O-tags without splitting the keyphrase mid-word)
             if keyword_words and idx != 0 and word_ids[idx - 1].item() != wid:
                 kw = " ".join(keyword_words)
-                score = _score_keyphrase(keyword_probs, score_method)
+                if score_method == "eager":
+                    score = float(keyword_order)
+                    keyword_order += 1
+                else:
+                    score = _score_keyphrase(keyword_probs, score_method)
                 keywords.append((kw, score))
                 keyword_words = []
                 keyword_probs = []
@@ -171,7 +191,10 @@ def _extract_iob_keywords_word_level(
     # Flush any remaining keyphrase at the end of the sequence
     if keyword_words:
         kw = " ".join(keyword_words)
-        score = _score_keyphrase(keyword_probs, score_method)
+        if score_method == "eager":
+            score = float(keyword_order)
+        else:
+            score = _score_keyphrase(keyword_probs, score_method)
         keywords.append((kw, score))
 
     # Sort by score descending, then deduplicate by keyword string
@@ -246,6 +269,7 @@ def _decode_iob_keyphrases(
             token_probs = probs[i, 1 : seq_len - 1]
 
             keywords_with_scores: list[tuple[str, float]] = []
+            keyword_order = 0
 
             current_tokens: list[int] = []
             current_probs: list[float] = []
@@ -259,9 +283,13 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            prob_score = _score_keyphrase(
-                                probs=current_probs, method=score_method
-                            )
+                            if score_method == "eager":
+                                prob_score = float(keyword_order)
+                                keyword_order += 1
+                            else:
+                                prob_score = _score_keyphrase(
+                                    probs=current_probs, method=score_method
+                                )
                             keywords_with_scores.append((keyword, prob_score))
 
                     current_tokens = [token_ids[j].item()]
@@ -277,9 +305,13 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            prob_score = _score_keyphrase(
-                                probs=current_probs, method=score_method
-                            )
+                            if score_method == "eager":
+                                prob_score = float(keyword_order)
+                                keyword_order += 1
+                            else:
+                                prob_score = _score_keyphrase(
+                                    probs=current_probs, method=score_method
+                                )
 
                             keywords_with_scores.append((keyword, prob_score))
                         current_tokens = []
@@ -290,9 +322,12 @@ def _decode_iob_keyphrases(
                 decoded = tokenizer.decode(torch.tensor(current_tokens))
                 keyword = re.sub(r" - ", "-", decoded.strip())
                 if keyword:
-                    prob_score = _score_keyphrase(
-                        probs=current_probs, method=score_method
-                    )
+                    if score_method == "eager":
+                        prob_score = float(keyword_order)
+                    else:
+                        prob_score = _score_keyphrase(
+                            probs=current_probs, method=score_method
+                        )
                     keywords_with_scores.append((keyword, prob_score))
 
             keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
@@ -387,11 +422,14 @@ def _score_keyphrase(probs: list[float], method: str = "average") -> float:
         method: "average" (mean of token probs),
             "max" (highest single token prob),
             "min" (lowest token prob, conservative),
-            "geometric" (geometric mean, penalizes low-confidence tokens).
+            "geometric" (geometric mean, penalizes low-confidence tokens),
+            "eager" (returns 0.0, scoring handled at extraction level).
 
     Returns:
         Scalar confidence score for the keyphrase.
     """
+    if method == "eager":
+        return 0.0  # Scoring handled at extraction level based on order
     if method == "max":
         return max(probs)
     if method == "min":

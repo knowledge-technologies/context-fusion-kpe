@@ -36,6 +36,7 @@ def train(
     base_lr: float,
     head_lr: float,
     num_classes: int = 3,
+    use_class_weights: bool = True,
     class_weights: list[float] | None = None,
     class_frequencies: list[float] | None = None,
     log_every: int,
@@ -79,8 +80,12 @@ def train(
         base_lr: Learning rate for base encoder parameters.
         head_lr: Learning rate for refinement head parameters.
         num_classes: Number of output classes (2 for binary, 3 for IOB).
-        class_weights: Optional class weights for loss function. If None, computed
-            from training data for IOB scheme, or defaults to [1.0, 5.0] for binary.
+        use_class_weights: Whether to apply class weights in loss function.
+            If False, uses equal weighting (CrossEntropyLoss with weight=None).
+            If True, computes or uses provided class_weights.
+        class_weights: Optional class weights for loss function. If None and
+            use_class_weights=True, computed from training data for IOB scheme,
+            or defaults to [1.0, 5.0] for binary.
         class_frequencies: Optional class frequencies (percentages). If None, computed
             from training data alongside class weights.
         log_every: Print loss every this many optimizer steps.
@@ -146,24 +151,31 @@ def train(
         )
         logger.info(f"Using BCEWithLogitsLoss with pos_weight={pos_weight}")
     else:
-        # IOB classification: CrossEntropyLoss with class weights
-        if class_weights is None:
-            class_weights, class_frequencies = compute_class_weights(
-                train_df, num_classes
+        # IOB classification: CrossEntropyLoss with optional class weights
+        if use_class_weights:
+            if class_weights is None:
+                class_weights, class_frequencies = compute_class_weights(
+                    train_df, num_classes
+                )
+            else:
+                class_frequencies = None
+            class_weights_tensor = torch.tensor(
+                class_weights, dtype=torch.float32, device=device
             )
+            loss_fn = torch.nn.CrossEntropyLoss(
+                weight=class_weights_tensor,
+                reduction="none",
+            )
+            logger.info(f"Using CrossEntropyLoss with class_weights={class_weights}")
         else:
-            class_frequencies = None
-        class_weights_tensor = torch.tensor(
-            class_weights, dtype=torch.float32, device=device
-        )
-        loss_fn = torch.nn.CrossEntropyLoss(
-            weight=class_weights_tensor,
-            reduction="none",
-        )
-        logger.info(f"Using CrossEntropyLoss with class_weights={class_weights}")
+            loss_fn = torch.nn.CrossEntropyLoss(
+                weight=None,
+                reduction="none",
+            )
+            logger.info("Using CrossEntropyLoss with equal class weights (weight=None)")
 
     # Log class weights to W&B
-    if wandb and class_weights:
+    if wandb and class_weights and use_class_weights:
         wandb.log(
             {f"class_weights/class_{i}": w for i, w in enumerate(class_weights)},
             step=0,
@@ -302,6 +314,7 @@ def train(
                             val_df,
                             batch_size=val_batch_size,
                             num_classes=num_classes,
+                            use_class_weights=use_class_weights,
                             class_weights=class_weights,
                             device=device,
                             split="val",
@@ -419,6 +432,7 @@ def train(
                     val_df,
                     batch_size=val_batch_size,
                     num_classes=num_classes,
+                    use_class_weights=use_class_weights,
                     class_weights=class_weights,
                     device=device,
                     split="val",

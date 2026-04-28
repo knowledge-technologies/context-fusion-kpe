@@ -8,6 +8,7 @@ training:
   head_lr: 5.0e-5                    # learning rate for refinement head parameters
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
+  use_class_weights: false           # whether to apply class weights in loss (false = equal weighting, like legacy)
   warmup_ratio: 0.1                  # fraction of training steps for warmup
   use_scheduler: false                # whether to use a learning rate scheduler
   log_every: 500                     # log loss every N optimizer steps
@@ -28,7 +29,7 @@ evaluation:
   # apostrophes should be kept. We keep legacy behavior for reproducible comparisons.
   disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
   dedup_strategy: "stem"                  # "stem" (legacy) or "lowercase"
-  score_method: "average"                 # "average" (legacy) or "max" probability
+  score_method: "eager"                   # "eager" (first N in order), "average", "max", "min", "geometric"
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable

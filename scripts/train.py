@@ -277,11 +277,17 @@ def main() -> None:
 
     # Compute class weights from training data (used for loss weighting)
     num_classes = hyperparams["num_classes"]
-    class_weights, class_frequencies = compute_class_weights(train_df, num_classes)
-    hyperparams["class_weights"] = class_weights
-    hyperparams["class_frequencies"] = class_frequencies
-    logger.info(f"Class weights (from train split): {class_weights}")
-    logger.info(f"Class frequencies (from train split): {class_frequencies}")
+    use_class_weights = hyperparams.get("use_class_weights", True)
+    if use_class_weights:
+        class_weights, class_frequencies = compute_class_weights(train_df, num_classes)
+        hyperparams["class_weights"] = class_weights
+        hyperparams["class_frequencies"] = class_frequencies
+        logger.info(f"Class weights (from train split): {class_weights}")
+        logger.info(f"Class frequencies (from train split): {class_frequencies}")
+    else:
+        class_weights = None
+        class_frequencies = None
+        logger.info("Class weights disabled (use_class_weights=False)")
 
     try:
         train(
@@ -293,8 +299,9 @@ def main() -> None:
             base_lr=hyperparams["base_lr"],
             head_lr=hyperparams["head_lr"],
             num_classes=hyperparams["num_classes"],
-            class_weights=hyperparams["class_weights"],
-            class_frequencies=hyperparams["class_frequencies"],
+            use_class_weights=use_class_weights,
+            class_weights=hyperparams.get("class_weights"),
+            class_frequencies=hyperparams.get("class_frequencies"),
             warmup_ratio=hyperparams["warmup_ratio"],
             use_scheduler=hyperparams.get("use_scheduler", True),
             log_every=hyperparams["log_every"],
@@ -316,6 +323,7 @@ def main() -> None:
             filter_punctuation=hyperparams["filter_punctuation"],
             disallowed_punctuation=hyperparams["disallowed_punctuation"],
             dedup_strategy=hyperparams["dedup_strategy"],
+            score_method=hyperparams.get("score_method", "average"),
         )
 
         # Final evaluation on the test split
@@ -328,7 +336,8 @@ def main() -> None:
                 test_df,
                 batch_size=hyperparams["val_batch_size"],
                 num_classes=hyperparams["num_classes"],
-                class_weights=hyperparams["class_weights"],
+                use_class_weights=use_class_weights,
+                class_weights=hyperparams.get("class_weights"),
                 device=device,
                 split="test",
                 k_values=hyperparams.get("k_values"),
@@ -338,6 +347,7 @@ def main() -> None:
                 epoch=hyperparams["epochs"],
                 max_keyphrases=hyperparams["max_keyphrases"],
                 max_keyphrase_length=hyperparams["max_keyphrase_length"],
+                score_method=hyperparams.get("score_method", "average"),
                 filter_punctuation=hyperparams["filter_punctuation"],
                 disallowed_punctuation=hyperparams["disallowed_punctuation"],
                 dedup_strategy=hyperparams["dedup_strategy"],
