@@ -620,6 +620,51 @@ def test_aggregate_tokens_to_words_skips_special_tokens():
     assert len(word_probs) == 1
 
 
+def test_aggregate_tokens_to_words_weak_prefix_strong_root():
+    """Test that a weak O prefix doesn't override a strong B root.
+
+    Scenario: 'prediction' → ['pre', '##diction']
+    - 'pre'       → O-dominant (noisy prefix)
+    - '##diction' → B-dominant (confident root)
+    Averaging should yield B as the word label.
+    """
+    word_ids = torch.tensor([-1, 0, 0, -1])
+    token_probs = torch.tensor(
+        [
+            [0.9, 0.05, 0.05],  # [CLS] → O
+            [0.55, 0.30, 0.15],  # 'pre' → O (weak)
+            [0.05, 0.80, 0.15],  # '##diction' → B (strong)
+            [0.9, 0.05, 0.05],  # [SEP] → O
+        ]
+    )
+
+    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
+
+    assert len(word_preds) == 1
+    assert word_preds[0] == 1  # B, not O
+    # avg P(B) = (0.30 + 0.80) / 2 = 0.55
+    assert abs(word_probs[0] - 0.55) < 1e-6
+
+
+def test_aggregate_tokens_to_words_single_subword():
+    """Test that single-subword words behave identically to before."""
+    word_ids = torch.tensor([-1, 0, 1, -1])
+    token_probs = torch.tensor(
+        [
+            [0.9, 0.05, 0.05],  # [CLS]
+            [0.1, 0.85, 0.05],  # 'AI' → B
+            [0.8, 0.1, 0.1],  # 'is' → O
+            [0.9, 0.05, 0.05],  # [SEP]
+        ]
+    )
+
+    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
+
+    assert word_preds == [1, 0]
+    assert abs(word_probs[0] - 0.85) < 1e-6
+    assert abs(word_probs[1] - 0.8) < 1e-6
+
+
 def test_iob_subword_fallback():
     """Test backward compatibility when word_ids=None uses subword-level extraction."""
     tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
