@@ -42,7 +42,7 @@ def _decode_binary_keyphrases(
         List of keyword lists with confidence scores, one per sentence.
     """
     batch_size = predictions.shape[0]
-    all_keywords: list[list[tuple[str, float]]] = []
+    all_keyphrases: list[list[tuple[str, float]]] = []
 
     probs = torch.sigmoid(predictions)
 
@@ -59,7 +59,7 @@ def _decode_binary_keyphrases(
         current_probs: list[float] = []
 
         for j in range(len(token_ids)):
-            token_id = token_ids[j].item()
+            token_id = int(token_ids[j].item())
             prob = token_probs[j].item()
 
             if prob > 0.5:
@@ -105,108 +105,126 @@ def _decode_binary_keyphrases(
                 seen.add(kw)
                 deduped.append((kw, score))
 
-        all_keywords.append(deduped)
+        all_keyphrases.append(deduped)
 
-    return all_keywords
+    return all_keyphrases
+
+
+def _aggregate_tokens_to_words(
+    token_preds: torch.Tensor,
+    token_probs: torch.Tensor,
+    word_ids: torch.Tensor,
+) -> tuple[list[int], list[float]]:
+    """Aggregate token-level predictions to word-level by grouping subwords.
+
+    For each word (grouped by word_id), the word-level prediction is taken
+    from the first subword token, and the confidence score is the mean
+    P(predicted_class) across all subword tokens.
+
+    Args:
+        token_preds: (seq_len,) tensor of class IDs (0=O, 1=B, 2=I).
+        token_probs: (seq_len, num_classes) tensor of softmax probabilities.
+        word_ids: (seq_len,) tensor mapping tokens to word indices
+            (-1 for special/padding).
+
+    Returns:
+        Tuple of (word_preds, word_probs) as plain Python lists.
+    """
+    word_token_indices: dict[int, list[int]] = {}
+    for idx in range(len(word_ids)):
+        wid = int(word_ids[idx].item())
+        if wid == -1:
+            continue
+        if wid not in word_token_indices:
+            word_token_indices[wid] = []
+        word_token_indices[wid].append(idx)
+
+    word_preds: list[int] = []
+    word_probs: list[float] = []
+
+    for wid in sorted(word_token_indices.keys()):
+        indices = word_token_indices[wid]
+        first_idx = indices[0]
+        pred = int(token_preds[first_idx].item())
+        word_preds.append(pred)
+
+        prob = sum(token_probs[idx, pred].item() for idx in indices) / len(indices)
+        word_probs.append(prob)
+
+    return word_preds, word_probs
 
 
 def _extract_iob_keywords_word_level(
-    predictions: torch.Tensor,
-    word_ids: torch.Tensor,
+    word_preds: list[int],
+    word_probs: list[float],
     word_list: list[str],
-    token_probs: torch.Tensor,
     score_method: str = "average",
 ) -> list[tuple[str, float]]:
-    """Extract keywords using word-boundary logic (matches legacy TNT-KID).
+    """Extract keyphrases from word-level IOB predictions.
 
-    Unlike subword-level extraction, this function respects word boundaries
-    when starting, continuing, or terminating keyphrase spans. This prevents
-    partial-word keyphrases and handles intra-word O-tags correctly.
+    Operates on pre-aggregated word-level data (subword tokens already merged
+    by word_id). Each word has a single B/I/O prediction and a confidence score.
 
     Args:
-        predictions: (seq_len,) tensor of class IDs (0=O, 1=B, 2=I).
-        word_ids: (seq_len,) tensor mapping each token to its word index (-1 for special/padding).
-        word_list: Original words from the sentence, indexed by word_id.
-        token_probs: (seq_len,) tensor of keyword-level probabilities (1 - P(O)).
-        score_method: How to aggregate token probs ("average", "max", "min", "geometric", or "eager").
+        word_preds: Word-level class IDs (0=O, 1=B, 2=I), one per word.
+        word_probs: Word-level confidence scores, one per word.
+        word_list: The actual word strings, indexed to match word_preds.
+        score_method: How to aggregate word probs ("average", "max", "min",
+            "geometric", or "eager").
 
     Returns:
-        List of (keyword, score) tuples. For "eager", scores are based on order of appearance.
+        List of (keyphrase, score) tuples. No deduplication — handled at
+        document level by aggregate_document_keyphrases.
     """
-    keywords = []
-    keyword_words = []  # Words in the current keyphrase being built
-    keyword_probs = []  # Token probs for the current keyphrase
-    keyword_order = 0  # Track order of appearance for "eager" scoring
+    keyphrases = []
+    keyphrase_words = []
+    keyphrase_probs = []
+    keyphrase_order = 0
 
-    for idx in range(len(predictions)):
-        wid = word_ids[idx].item()
-        if wid == -1:
-            # Skip special tokens ([CLS], [SEP]) and padding
-            continue
-
-        pred = predictions[idx].item()
-        prob = token_probs[idx].item()
+    for idx in range(len(word_preds)):
+        pred = word_preds[idx]
+        prob = word_probs[idx]
 
         if pred == 1:  # B-tag: start of a new keyphrase
-            # At start of a new keyphrase (B), score any
-            # current keyphrase, store it, then empty the slot
-            if keyword_words:
-                kw = " ".join(keyword_words)
+            if keyphrase_words:
+                kp = " ".join(keyphrase_words)
                 if score_method == "eager":
-                    score = -float(keyword_order)
-                    keyword_order += 1
+                    score = -float(keyphrase_order)
+                    keyphrase_order += 1
                 else:
-                    score = _score_keyphrase(keyword_probs, score_method)
-                keywords.append((kw, score))
-                keyword_words = []
-                keyword_probs = []
+                    score = _score_keyphrase(keyphrase_probs, score_method)
+                keyphrases.append((kp, score))
+                keyphrase_words = []
+                keyphrase_probs = []
 
-            # Only start a new keyphrase at a word boundary
-            # (first token of a word, not a continuation subword)
-            if idx == 0 or word_ids[idx - 1].item() != wid:
-                keyword_words.append(word_list[wid])
-                keyword_probs.append(prob)
+            keyphrase_words.append(word_list[idx])
+            keyphrase_probs.append(prob)
 
-        elif pred == 2:  # I-tag: continuation of the current keyphrase
-            # Only append to the current keyphrase at a word boundary
-            # (this prevents adding the same word multiple times for multi-subword tokens)
-            if idx != 0 and word_ids[idx - 1].item() != wid:
-                keyword_words.append(word_list[wid])
-                keyword_probs.append(prob)
+        elif pred == 2:  # I-tag: continuation of current keyphrase
+            keyphrase_words.append(word_list[idx])
+            keyphrase_probs.append(prob)
 
         else:  # O-tag: outside any keyphrase
-            # Only terminate the current keyphrase at a word boundary
-            # (this preserves intra-word O-tags without splitting the keyphrase mid-word)
-            if keyword_words and idx != 0 and word_ids[idx - 1].item() != wid:
-                kw = " ".join(keyword_words)
+            if keyphrase_words:
+                kp = " ".join(keyphrase_words)
                 if score_method == "eager":
-                    score = -float(keyword_order)
-                    keyword_order += 1
+                    score = -float(keyphrase_order)
+                    keyphrase_order += 1
                 else:
-                    score = _score_keyphrase(keyword_probs, score_method)
-                keywords.append((kw, score))
-                keyword_words = []
-                keyword_probs = []
+                    score = _score_keyphrase(keyphrase_probs, score_method)
+                keyphrases.append((kp, score))
+                keyphrase_words = []
+                keyphrase_probs = []
 
-    # Flush any remaining keyphrase at the end of the sequence
-    if keyword_words:
-        kw = " ".join(keyword_words)
+    if keyphrase_words:
+        kp = " ".join(keyphrase_words)
         if score_method == "eager":
-            score = -float(keyword_order)
+            score = -float(keyphrase_order)
         else:
-            score = _score_keyphrase(keyword_probs, score_method)
-        keywords.append((kw, score))
+            score = _score_keyphrase(keyphrase_probs, score_method)
+        keyphrases.append((kp, score))
 
-    # Sort by score descending, then deduplicate by keyword string
-    keywords.sort(key=lambda x: x[1], reverse=True)
-    seen = set()
-    deduped = []
-    for kw, score in keywords:
-        if kw not in seen:
-            seen.add(kw)
-            deduped.append((kw, score))
-
-    return deduped
+    return keyphrases
 
 
 def _decode_iob_keyphrases(
@@ -237,7 +255,7 @@ def _decode_iob_keyphrases(
         List of keyword lists with confidence scores, one per sentence.
     """
     batch_size = predictions.shape[0]
-    all_keywords: list[list[tuple[str, float]]] = []
+    all_keyphrases: list[list[tuple[str, float]]] = []
 
     class_preds = torch.argmax(predictions, dim=-1)
     probs = torch.softmax(predictions, dim=-1)
@@ -249,17 +267,17 @@ def _decode_iob_keyphrases(
         seq_len = attention_mask[i].sum().item()
 
         if use_word_level:
-            # Word-boundary extraction: use full sequence, skip special tokens via word_ids == -1
             token_preds = class_preds[i, :seq_len]
             token_probs = probs[i, :seq_len]
+            sentence_word_ids = word_ids[i, :seq_len]
 
-            # Use 1 - P(O) as keyword-level probability (consistent across B/I tags)
-            keyword_probs = 1.0 - token_probs[:, 0]
-            sentence_keywords = _extract_iob_keywords_word_level(
-                token_preds,
-                word_ids[i, :seq_len],
+            word_preds, word_probs = _aggregate_tokens_to_words(
+                token_preds, token_probs, sentence_word_ids
+            )
+            sentence_keyphrases = _extract_iob_keywords_word_level(
+                word_preds,
+                word_probs,
                 word_lists[i],
-                keyword_probs,
                 score_method,
             )
         else:
@@ -292,12 +310,12 @@ def _decode_iob_keyphrases(
                                 )
                             keywords_with_scores.append((keyword, prob_score))
 
-                    current_tokens = [token_ids[j].item()]
+                    current_tokens = [int(token_ids[j].item())]
                     current_probs = [prob]
 
                 elif pred == 2:
                     if current_tokens:
-                        current_tokens.append(token_ids[j].item())
+                        current_tokens.append(int(token_ids[j].item()))
                         current_probs.append(prob)
 
                 else:
@@ -339,11 +357,11 @@ def _decode_iob_keyphrases(
                     seen.add(kw)
                     deduped.append((kw, score))
 
-            sentence_keywords = deduped
+            sentence_keyphrases = deduped
 
-        all_keywords.append(sentence_keywords)
+        all_keyphrases.append(sentence_keyphrases)
 
-    return all_keywords
+    return all_keyphrases
 
 
 def extract_ranked_keyphrases(
