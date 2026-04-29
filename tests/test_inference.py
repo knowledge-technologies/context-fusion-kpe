@@ -7,6 +7,7 @@ from keyword_pecker.data import extract_word_level_data
 from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
+    _aggregate_tokens_to_words,
     _extract_iob_keywords_word_level,
     _score_keyphrase,
 )
@@ -454,6 +455,26 @@ def test_aggregate_document_keyphrases_stem_dedup():
     assert result[("doc1", 0)][0][1] == 0.9
 
 
+def test_aggregate_document_keyphrases_case_insensitive_stem():
+    """Test that stem dedup handles full case differences like 'Value Management' vs 'value management'."""
+    predictions = [[("Value Management", 0.7), ("value management", 0.9)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], dedup_strategy="stem"
+    )
+    assert len(result[("doc1", 0)]) == 1
+    assert result[("doc1", 0)][0][1] == 0.9
+
+
+def test_aggregate_document_keyphrases_hyphen_normalization():
+    """Test that hyphenated and space-separated variants are deduplicated."""
+    predictions = [[("event related", 0.8), ("event-related", 0.9)]]
+    result = aggregate_document_keyphrases(
+        predictions, ["doc1"], [0], dedup_strategy="stem"
+    )
+    assert len(result[("doc1", 0)]) == 1
+    assert result[("doc1", 0)][0][1] == 0.9
+
+
 def test_aggregate_document_keyphrases_lowercase_dedup():
     """Test that lowercase deduplication is case-insensitive."""
     predictions = [[("Machine Learning", 0.9), ("machine learning", 0.8)]]
@@ -509,89 +530,101 @@ def test_aggregate_document_keyphrases_dash_allowed_apostrophe_filtered():
 
 
 def test_iob_word_level_single_keyword():
-    """Test word-level extraction with multi-subword word, B/I/O transitions."""
-    # Simulate: "machine learning" where "learning" is split into 2 subwords
-    # Token positions: [CLS] ma chine learn ing [SEP] [PAD]
-    # Word IDs:        -1    0     0     1     1    -1    -1
-    # Predictions:      O    B     I     I     I     O     O  (but only first subword of each word matters)
-    predictions = torch.tensor([0, 1, 2, 2, 2, 0, 0])  # 0 B I I I O O (all tokens)
-    word_ids = torch.tensor([-1, 0, 0, 1, 1, -1, -1])
-    word_list = ["machine", "learning"]
-    token_probs = torch.tensor([0.0, 0.9, 0.9, 0.8, 0.8, 0.0, 0.0])
+    """Test word-level extraction with B/I/O transitions."""
+    word_preds = [1, 2, 0, 0]
+    word_probs = [0.9, 0.8, 0.1, 0.1]
+    word_list = ["machine", "learning", "is", "great"]
 
-    result = _extract_iob_keywords_word_level(
-        predictions, word_ids, word_list, token_probs
-    )
+    result = _extract_iob_keywords_word_level(word_preds, word_probs, word_list)
 
     assert len(result) == 1
     assert result[0][0] == "machine learning"
     assert result[0][1] > 0.5
 
 
-def test_iob_word_level_boundary_logic():
-    """Test that O-tag mid-word doesn't terminate keyphrase."""
+def test_iob_word_level_multiple_keywords():
+    """Test extraction of two separate keyphrases."""
+    word_preds = [1, 0, 1, 2, 0]
+    word_probs = [0.9, 0.1, 0.8, 0.7, 0.1]
+    word_list = ["neural", "and", "deep", "learning", "stuff"]
 
-    predictions = torch.tensor([0, 1, 2, 0, 0])
-    word_ids = torch.tensor([-1, 0, 1, 1, -1])  # deep (0) lear (I) ning (0)
-    word_list = ["deep", "learning"]
-    token_probs = torch.tensor([0.0, 0.9, 0.8, 0.0, 0.0])
-
-    result = _extract_iob_keywords_word_level(
-        predictions, word_ids, word_list, token_probs
-    )
-
-    assert len(result) == 1
-    assert result[0][0] == "deep learning"
-
-
-def test_iob_word_level_deduplication():
-    """Test that word-level extraction deduplicates keywords."""
-    # Same keyword predicted twice
-    predictions = torch.tensor([0, 1, 0, 1, 0])
-    word_ids = torch.tensor([-1, 0, -1, 0, -1])
-    word_list = ["networks"]
-    token_probs = torch.tensor([0.0, 0.9, 0.0, 0.8, 0.0])
-
-    result = _extract_iob_keywords_word_level(
-        predictions, word_ids, word_list, token_probs
-    )
-
-    assert len(result) == 1
-    assert result[0][0] == "networks"
-    assert abs(result[0][1] - 0.9) < 1e-5  # Higher score kept
-
-
-def test_iob_word_level_score_ranking():
-    """Test that results are sorted by score descending."""
-    predictions = torch.tensor([0, 1, 0, 1, 0])
-    word_ids = torch.tensor([-1, 0, -1, 1, -1])
-    word_list = ["neural", "networks"]
-    token_probs = torch.tensor([0.0, 0.7, 0.0, 0.9, 0.0])
-
-    result = _extract_iob_keywords_word_level(
-        predictions, word_ids, word_list, token_probs
-    )
+    result = _extract_iob_keywords_word_level(word_preds, word_probs, word_list)
 
     assert len(result) == 2
-    assert result[0][0] == "networks"  # Higher score first
-    assert result[1][0] == "neural"
+    assert result[0][0] == "neural"
+    assert result[1][0] == "deep learning"
 
 
 def test_iob_word_level_eager_method():
-    """Test that results are sorted eagerly by occurrence."""
-    predictions = torch.tensor([0, 1, 0, 1, 0, 1])
-    word_ids = torch.tensor([-1, 0, -1, 1, -1, 2])
+    """Test that eager scoring orders by occurrence, not score."""
+    word_preds = [1, 1, 1]
+    word_probs = [0.7, 0.9, 0.8]
     word_list = ["neural", "networks", "machines"]
-    token_probs = torch.tensor([0.0, 0.7, 0.0, 0.9, 0.0, 0.8])
 
     result = _extract_iob_keywords_word_level(
-        predictions, word_ids, word_list, token_probs, score_method="eager"
+        word_preds, word_probs, word_list, score_method="eager"
     )
 
     assert len(result) == 3
-    assert result[0][0] == "neural"  # lower score, but it appeared first
+    assert result[0][0] == "neural"
     assert result[1][0] == "networks"
     assert result[2][0] == "machines"
+
+
+# ============================================================================
+# Tests for _aggregate_tokens_to_words
+# ============================================================================
+
+
+def test_aggregate_tokens_to_words_basic():
+    """Test that subwords are grouped by word_id and first subword prediction is used."""
+    # [CLS] ma chine learn ing [SEP]
+    # Word IDs: -1   0   0    1    1   -1
+    # Preds:     O   B   I    I    I    O
+    token_preds = torch.tensor([0, 1, 2, 2, 2, 0])
+    word_ids = torch.tensor([-1, 0, 0, 1, 1, -1])
+    # 3 classes: P(O), P(B), P(I)
+    token_probs = torch.tensor(
+        [
+            [0.9, 0.05, 0.05],
+            [0.1, 0.85, 0.05],
+            [0.1, 0.1, 0.8],
+            [0.05, 0.05, 0.9],
+            [0.1, 0.1, 0.8],
+            [0.9, 0.05, 0.05],
+        ]
+    )
+
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_preds, token_probs, word_ids
+    )
+
+    assert word_preds == [1, 2]
+    assert len(word_probs) == 2
+    # Word 0: pred=B(1), avg P(B) across subwords = (0.85 + 0.1) / 2 = 0.475
+    assert abs(word_probs[0] - 0.475) < 1e-6
+    # Word 1: pred=I(2), avg P(I) across subwords = (0.9 + 0.8) / 2 = 0.85
+    assert abs(word_probs[1] - 0.85) < 1e-6
+
+
+def test_aggregate_tokens_to_words_skips_special_tokens():
+    """Test that word_id=-1 tokens are skipped."""
+    token_preds = torch.tensor([0, 1, 0])
+    word_ids = torch.tensor([-1, 0, -1])
+    token_probs = torch.tensor(
+        [
+            [0.9, 0.1],
+            [0.1, 0.9],
+            [0.9, 0.1],
+        ]
+    )
+
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_preds, token_probs, word_ids
+    )
+
+    assert word_preds == [1]
+    assert len(word_probs) == 1
 
 
 def test_iob_subword_fallback():
