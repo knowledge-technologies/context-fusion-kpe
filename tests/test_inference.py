@@ -577,13 +577,11 @@ def test_iob_word_level_eager_method():
 
 
 def test_aggregate_tokens_to_words_basic():
-    """Test that subwords are grouped by word_id and first subword prediction is used."""
+    """Test that subwords are grouped by word_id and averaged probabilities determine the label."""
     # [CLS] ma chine learn ing [SEP]
     # Word IDs: -1   0   0    1    1   -1
-    # Preds:     O   B   I    I    I    O
-    token_preds = torch.tensor([0, 1, 2, 2, 2, 0])
-    word_ids = torch.tensor([-1, 0, 0, 1, 1, -1])
     # 3 classes: P(O), P(B), P(I)
+    word_ids = torch.tensor([-1, 0, 0, 1, 1, -1])
     token_probs = torch.tensor(
         [
             [0.9, 0.05, 0.05],
@@ -595,21 +593,18 @@ def test_aggregate_tokens_to_words_basic():
         ]
     )
 
-    word_preds, word_probs = _aggregate_tokens_to_words(
-        token_preds, token_probs, word_ids
-    )
+    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
 
     assert word_preds == [1, 2]
     assert len(word_probs) == 2
-    # Word 0: pred=B(1), avg P(B) across subwords = (0.85 + 0.1) / 2 = 0.475
+    # Word 0: avg P(O)=0.1, P(B)=0.475, P(I)=0.425 → pred=B(1), conf=0.475
     assert abs(word_probs[0] - 0.475) < 1e-6
-    # Word 1: pred=I(2), avg P(I) across subwords = (0.9 + 0.8) / 2 = 0.85
+    # Word 1: avg P(O)=0.075, P(B)=0.075, P(I)=0.85 → pred=I(2), conf=0.85
     assert abs(word_probs[1] - 0.85) < 1e-6
 
 
 def test_aggregate_tokens_to_words_skips_special_tokens():
     """Test that word_id=-1 tokens are skipped."""
-    token_preds = torch.tensor([0, 1, 0])
     word_ids = torch.tensor([-1, 0, -1])
     token_probs = torch.tensor(
         [
@@ -619,9 +614,7 @@ def test_aggregate_tokens_to_words_skips_special_tokens():
         ]
     )
 
-    word_preds, word_probs = _aggregate_tokens_to_words(
-        token_preds, token_probs, word_ids
-    )
+    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
 
     assert word_preds == [1]
     assert len(word_probs) == 1
