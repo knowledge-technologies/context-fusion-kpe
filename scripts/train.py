@@ -209,6 +209,8 @@ def main() -> None:
             "save_weights": args.save_weights,
             "max_keyphrases": eval_cfg.get("max_keyphrases", 10),
             "max_keyphrase_length": eval_cfg.get("max_keyphrase_length", 5),
+            "scoring_strategy": eval_cfg.get("scoring_strategy", "confidence"),
+            "score_method": eval_cfg.get("score_method", "average"),
             "filter_punctuation": eval_cfg.get("filter_punctuation", True),
             "disallowed_punctuation": eval_cfg.get(
                 "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
@@ -243,6 +245,8 @@ def main() -> None:
             "save_weights": args.save_weights,
             "max_keyphrases": 10,
             "max_keyphrase_length": 5,
+            "scoring_strategy": "confidence",
+            "score_method": "average",
             "filter_punctuation": True,
             "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
             "dedup_strategy": "stem",
@@ -285,8 +289,6 @@ def main() -> None:
         logger.info(f"Class weights (from train split): {class_weights}")
         logger.info(f"Class frequencies (from train split): {class_frequencies}")
     else:
-        class_weights = None
-        class_frequencies = None
         logger.info("Class weights disabled (use_class_weights=False)")
 
     try:
@@ -320,10 +322,11 @@ def main() -> None:
             early_stopping_check_every=hyperparams.get("early_stopping_check_every", 0),
             max_keyphrases=hyperparams["max_keyphrases"],
             max_keyphrase_length=hyperparams["max_keyphrase_length"],
+            scoring_strategy=hyperparams.get("scoring_strategy", "confidence"),
+            score_method=hyperparams.get("score_method", "average"),
             filter_punctuation=hyperparams["filter_punctuation"],
             disallowed_punctuation=hyperparams["disallowed_punctuation"],
             dedup_strategy=hyperparams["dedup_strategy"],
-            score_method=hyperparams.get("score_method", "average"),
         )
 
         # Final evaluation on the test split
@@ -347,6 +350,7 @@ def main() -> None:
                 epoch=hyperparams["epochs"],
                 max_keyphrases=hyperparams["max_keyphrases"],
                 max_keyphrase_length=hyperparams["max_keyphrase_length"],
+                scoring_strategy=hyperparams.get("scoring_strategy", "confidence"),
                 score_method=hyperparams.get("score_method", "average"),
                 filter_punctuation=hyperparams["filter_punctuation"],
                 disallowed_punctuation=hyperparams["disallowed_punctuation"],

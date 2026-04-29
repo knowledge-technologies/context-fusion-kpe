@@ -29,7 +29,8 @@ evaluation:
   # apostrophes should be kept. We keep legacy behavior for reproducible comparisons.
   disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
   dedup_strategy: "stem"                  # "stem" (legacy) or "lowercase"
-  score_method: "eager"                   # "eager" (first N in order), "average", "max", "min", "geometric"
+  scoring_strategy: "ordinal"              # "confidence" (model probabilities) or "ordinal" (extraction order)
+  score_method: "average"                  # "average", "max", "min", "geometric", (only applies when `scoring_strategy = 'confidence'`)
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable

@@ -269,6 +269,7 @@ def evaluate_model(
     sample_seed: int = 42,
     max_keyphrases: int = 10,
     max_keyphrase_length: int = 5,
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
     filter_punctuation: bool = True,
     disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
@@ -306,7 +307,8 @@ def evaluate_model(
         max_keyphrases: Deprecated. Metrics are now computed on uncapped
             predictions; @k metrics handle their own cutoff internally.
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
-        score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "eager", etc.)
+        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
+        score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters (default: True).
         disallowed_punctuation: String of punctuation characters to filter from
@@ -408,6 +410,7 @@ def evaluate_model(
                 attention_mask.cpu(),
                 model.tokenizer,
                 num_classes=num_classes,
+                scoring_strategy=scoring_strategy,
                 score_method=score_method,
                 word_ids=batch.get("word_ids"),
                 word_lists=batch.get("word_lists"),

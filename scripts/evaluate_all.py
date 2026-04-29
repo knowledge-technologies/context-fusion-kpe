@@ -118,7 +118,8 @@ def load_eval_config(args: argparse.Namespace) -> dict:
             "k_values": training_cfg.get("k_values", args.k_values),
             "max_keyphrases": eval_cfg.get("max_keyphrases", 10),
             "max_keyphrase_length": eval_cfg.get("max_keyphrase_length", 5),
-            "score_method": eval_cfg.get("score_method", "avarage"),
+            "scoring_strategy": eval_cfg.get("scoring_strategy", "confidence"),
+            "score_method": eval_cfg.get("score_method", "average"),
             "filter_punctuation": eval_cfg.get("filter_punctuation", True),
             "disallowed_punctuation": eval_cfg.get(
                 "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
@@ -134,6 +135,7 @@ def load_eval_config(args: argparse.Namespace) -> dict:
         "k_values": args.k_values,
         "max_keyphrases": 10,
         "max_keyphrase_length": 5,
+        "scoring_strategy": "confidence",
         "score_method": "average",
         "filter_punctuation": True,
         "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
@@ -207,6 +209,7 @@ def main() -> None:
             k_values=config["k_values"],
             max_keyphrases=config["max_keyphrases"],
             max_keyphrase_length=config["max_keyphrase_length"],
+            scoring_strategy=config.get("scoring_strategy", "confidence"),
             score_method=config["score_method"],
             filter_punctuation=config["filter_punctuation"],
             disallowed_punctuation=config["disallowed_punctuation"],

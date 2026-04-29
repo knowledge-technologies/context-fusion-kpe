@@ -28,6 +28,7 @@ def _decode_binary_keyphrases(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from binary predictions using sigmoid + threshold.
@@ -70,7 +71,7 @@ def _decode_binary_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        if score_method == "eager":
+                        if scoring_strategy == "ordinal":
                             prob_score = -float(keyword_order)
                             keyword_order += 1
                         else:
@@ -88,7 +89,7 @@ def _decode_binary_keyphrases(
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                if score_method == "eager":
+                if scoring_strategy == "ordinal":
                     kw_score = -float(keyword_order)
                 else:
                     kw_score = _score_keyphrase(
@@ -154,6 +155,7 @@ def _extract_iob_keywords_word_level(
     word_preds: list[int],
     word_probs: list[float],
     word_list: list[str],
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
 ) -> list[tuple[str, float]]:
     """Extract keyphrases from word-level IOB predictions.
@@ -165,8 +167,8 @@ def _extract_iob_keywords_word_level(
         word_preds: Word-level class IDs (0=O, 1=B, 2=I), one per word.
         word_probs: Word-level confidence scores, one per word.
         word_list: The actual word strings, indexed to match word_preds.
-        score_method: How to aggregate word probs ("average", "max", "min",
-            "geometric", or "eager").
+        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order.
+        score_method: How to aggregate word probs ("average", "max", "min", "geometric").
 
     Returns:
         List of (keyphrase, score) tuples. No deduplication — handled at
@@ -184,7 +186,7 @@ def _extract_iob_keywords_word_level(
         if pred == 1:  # B-tag: start of a new keyphrase
             if keyphrase_words:
                 kp = " ".join(keyphrase_words)
-                if score_method == "eager":
+                if scoring_strategy == "ordinal":
                     score = -float(keyphrase_order)
                     keyphrase_order += 1
                 else:
@@ -203,7 +205,7 @@ def _extract_iob_keywords_word_level(
         else:  # O-tag: outside any keyphrase
             if keyphrase_words:
                 kp = " ".join(keyphrase_words)
-                if score_method == "eager":
+                if scoring_strategy == "ordinal":
                     score = -float(keyphrase_order)
                     keyphrase_order += 1
                 else:
@@ -214,7 +216,7 @@ def _extract_iob_keywords_word_level(
 
     if keyphrase_words:
         kp = " ".join(keyphrase_words)
-        if score_method == "eager":
+        if scoring_strategy == "ordinal":
             score = -float(keyphrase_order)
         else:
             score = _score_keyphrase(keyphrase_probs, score_method)
@@ -228,6 +230,7 @@ def _decode_iob_keyphrases(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     tokenizer,
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
@@ -273,6 +276,7 @@ def _decode_iob_keyphrases(
                 word_preds,
                 word_probs,
                 word_lists[i],
+                scoring_strategy,
                 score_method,
             )
         else:
@@ -296,7 +300,7 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            if score_method == "eager":
+                            if scoring_strategy == "ordinal":
                                 prob_score = -float(keyword_order)
                                 keyword_order += 1
                             else:
@@ -318,7 +322,7 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            if score_method == "eager":
+                            if scoring_strategy == "ordinal":
                                 prob_score = -float(keyword_order)
                                 keyword_order += 1
                             else:
@@ -335,7 +339,7 @@ def _decode_iob_keyphrases(
                 decoded = tokenizer.decode(torch.tensor(current_tokens))
                 keyword = re.sub(r" - ", "-", decoded.strip())
                 if keyword:
-                    if score_method == "eager":
+                    if scoring_strategy == "ordinal":
                         prob_score = -float(keyword_order)
                     else:
                         prob_score = _score_keyphrase(
@@ -358,6 +362,7 @@ def extract_ranked_keyphrases(
     attention_mask: torch.Tensor,
     tokenizer,
     num_classes: int | None = None,
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
@@ -396,6 +401,7 @@ def extract_ranked_keyphrases(
             input_ids,
             attention_mask,
             tokenizer,
+            scoring_strategy,
             score_method,
         )
     else:
@@ -404,6 +410,7 @@ def extract_ranked_keyphrases(
             input_ids,
             attention_mask,
             tokenizer,
+            scoring_strategy,
             score_method,
             word_ids=word_ids,
             word_lists=word_lists,
@@ -428,14 +435,11 @@ def _score_keyphrase(probs: list[float], method: str = "average") -> float:
         method: "average" (mean of token probs),
             "max" (highest single token prob),
             "min" (lowest token prob, conservative),
-            "geometric" (geometric mean, penalizes low-confidence tokens),
-            "eager" (returns 0.0, scoring handled at extraction level).
+            "geometric" (geometric mean, penalizes low-confidence tokens).
 
     Returns:
         Scalar confidence score for the keyphrase.
     """
-    if method == "eager":
-        return 0.0  # Scoring handled at extraction level based on order
     if method == "max":
         return max(probs)
     if method == "min":
@@ -567,6 +571,7 @@ def predict_keyphrases(
     nlp: spacy.Language | None = None,
     device: torch.device | str | None = None,
     nr_keyphrases: int | None = None,
+    scoring_strategy: str = "confidence",
     score_method: str = "average",
     return_scores: bool = False,
 ) -> list[str] | list[KeyphraseResult]:
@@ -653,6 +658,7 @@ def predict_keyphrases(
         attention_mask,
         model.tokenizer,
         num_classes=model.refinement_head.num_classes,
+        scoring_strategy=scoring_strategy,
         score_method=score_method,
         word_ids=padded_word_ids.to(device),
         word_lists=word_lists,
