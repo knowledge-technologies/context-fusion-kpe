@@ -228,6 +228,15 @@ def compute_metrics_at_k_martinc(
     if k_values is None:
         k_values = [5, 10, "N", "M"]
 
+    # Normalize hyphens to spaces on both gold and predicted keyphrases
+    # so that "value-based" and "value based" match correctly during evaluation
+    gold_keywords = [
+        [kw.replace("-", " ") for kw in doc_kws] for doc_kws in gold_keywords
+    ]
+    pred_keywords = [
+        [kw.replace("-", " ") for kw in doc_kws] for doc_kws in pred_keywords
+    ]
+
     num_docs_total = len(gold_keywords)
     num_docs_removed = (
         sum(1 for g in gold_keywords if len(g) == 0) if remove_docs_with_no_kw else 0
