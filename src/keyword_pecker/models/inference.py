@@ -98,14 +98,7 @@ def _decode_binary_keyphrases(
 
         keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
-        seen: set[str] = set()
-        deduped: list[tuple[str, float]] = []
-        for kw, score in keywords_with_scores:
-            if kw not in seen:
-                seen.add(kw)
-                deduped.append((kw, score))
-
-        all_keyphrases.append(deduped)
+        all_keyphrases.append(keywords_with_scores)
 
     return all_keyphrases
 
@@ -350,14 +343,7 @@ def _decode_iob_keyphrases(
 
             keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
-            seen: set[str] = set()
-            deduped: list[tuple[str, float]] = []
-            for kw, score in keywords_with_scores:
-                if kw not in seen:
-                    seen.add(kw)
-                    deduped.append((kw, score))
-
-            sentence_keyphrases = deduped
+            sentence_keyphrases = keywords_with_scores
 
         all_keyphrases.append(sentence_keyphrases)
 
@@ -534,8 +520,11 @@ def aggregate_document_keyphrases(
         seen: dict[str, tuple[str, float]] = {}
         for kw, score in predictions:
             if dedup_strategy == "stem":
-                # Stem each word to group variants like "machine"/"machines"
-                kw_key = " ".join([_stemmer.stem(w) for w in kw.split()])
+                # Normalize hyphens to spaces, then lowercase and stem each word
+                normalized = kw.replace("-", " ")
+                kw_key = " ".join(
+                    [_stemmer.stem(w.lower()) for w in normalized.split()]
+                )
                 # Skip keyphrases containing repeated stemmed words
                 if len(kw_key.split()) != len(set(kw_key.split())):
                     continue
