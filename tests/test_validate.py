@@ -238,3 +238,15 @@ def test_compute_metrics_at_k_martinc_key_naming():
     assert "num_docs_total" in metrics
     assert "num_docs_removed" in metrics
     assert "num_docs_evaluated" in metrics
+
+
+def test_compute_metrics_at_k_martinc_hyphen_normalization():
+    """Test that hyphenated and space-separated keyphrases match correctly."""
+    gold = [["value based"]]
+    pred = [["value-based"]]
+
+    metrics = compute_metrics_at_k_martinc(gold, pred, k_values=[5])
+
+    # After hyphen normalization, "value-based" and "value based" should match
+    assert metrics["precision@5"] == 1.0
+    assert metrics["recall@5"] == 1.0
