@@ -104,18 +104,19 @@ def _decode_binary_keyphrases(
 
 
 def _aggregate_tokens_to_words(
-    token_preds: torch.Tensor,
     token_probs: torch.Tensor,
     word_ids: torch.Tensor,
 ) -> tuple[list[int], list[float]]:
     """Aggregate token-level predictions to word-level by grouping subwords.
 
-    For each word (grouped by word_id), the word-level prediction is taken
-    from the first subword token, and the confidence score is the mean
-    P(predicted_class) across all subword tokens.
+    For each word (grouped by word_id), the word-level prediction is derived
+    by averaging softmax probabilities across all subword tokens, then taking
+    argmax. The confidence score is the averaged P(predicted_class).
+
+    This approach is more robust than using only the first subword's label,
+    as it prevents a weak or noisy prefix from overriding a confident root.
 
     Args:
-        token_preds: (seq_len,) tensor of class IDs (0=O, 1=B, 2=I).
         token_probs: (seq_len, num_classes) tensor of softmax probabilities.
         word_ids: (seq_len,) tensor mapping tokens to word indices
             (-1 for special/padding).
@@ -132,17 +133,19 @@ def _aggregate_tokens_to_words(
             word_token_indices[wid] = []
         word_token_indices[wid].append(idx)
 
+    num_classes = token_probs.shape[1]
     word_preds: list[int] = []
     word_probs: list[float] = []
 
     for wid in sorted(word_token_indices.keys()):
         indices = word_token_indices[wid]
-        first_idx = indices[0]
-        pred = int(token_preds[first_idx].item())
+        avg_probs = [
+            sum(token_probs[idx, c].item() for idx in indices) / len(indices)
+            for c in range(num_classes)
+        ]
+        pred = int(max(range(num_classes), key=lambda c: avg_probs[c]))
         word_preds.append(pred)
-
-        prob = sum(token_probs[idx, pred].item() for idx in indices) / len(indices)
-        word_probs.append(prob)
+        word_probs.append(avg_probs[pred])
 
     return word_preds, word_probs
 
@@ -260,12 +263,11 @@ def _decode_iob_keyphrases(
         seq_len = attention_mask[i].sum().item()
 
         if use_word_level:
-            token_preds = class_preds[i, :seq_len]
             token_probs = probs[i, :seq_len]
             sentence_word_ids = word_ids[i, :seq_len]
 
             word_preds, word_probs = _aggregate_tokens_to_words(
-                token_preds, token_probs, sentence_word_ids
+                token_probs, sentence_word_ids
             )
             sentence_keyphrases = _extract_iob_keywords_word_level(
                 word_preds,
