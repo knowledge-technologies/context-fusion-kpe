@@ -90,6 +90,11 @@ def extract_keyphrases_from_predictions(
     return all_keywords
 
 
+def _normalize_keyphrases(keyphrases: list[str]) -> list[str]:
+    """Remove hyphens and lowercase"""
+    return [[kw.replace("-", " ").lower() for kw in doc_kws] for doc_kws in keyphrases]
+
+
 def compute_keyphrase_metrics(
     gold_keywords: list[set[str]],
     pred_keywords: list[set[str]],
@@ -227,15 +232,6 @@ def compute_metrics_at_k_martinc(
     """
     if k_values is None:
         k_values = [5, 10, "N", "M"]
-
-    # Normalize hyphens to spaces on both gold and predicted keyphrases
-    # so that "value-based" and "value based" match correctly during evaluation
-    gold_keywords = [
-        [kw.replace("-", " ") for kw in doc_kws] for doc_kws in gold_keywords
-    ]
-    pred_keywords = [
-        [kw.replace("-", " ") for kw in doc_kws] for doc_kws in pred_keywords
-    ]
 
     num_docs_total = len(gold_keywords)
     num_docs_removed = (
@@ -386,6 +382,8 @@ def evaluate_model(
 
     num_batches = len(val_loader)
 
+    breakpoint()
+
     with torch.no_grad():
         for batch in tqdm.tqdm(
             val_loader, desc=f"Evaluating ({split})", total=num_batches
@@ -462,6 +460,9 @@ def evaluate_model(
     gold_lists = [doc_to_gold[k] for k in doc_keys]
     pred_lists = [[kw for kw, _ in doc_to_pred_ranked[k]] for k in doc_keys]
 
+    gold_lists_norm = _normalize_keyphrases(keyphrases=gold_lists)
+    pred_lists_norm = _normalize_keyphrases(keyphrases=pred_lists)
+
     # Capture random samples for qualitative analysis
     num_samples = min(15, len(doc_keys))
     rng = random.Random(sample_seed)
@@ -473,8 +474,8 @@ def evaluate_model(
             {
                 "doc_id": doc_key[0],
                 "doc_row": doc_key[1],
-                "gold_keywords": sorted(gold_lists[idx]),
-                "pred_keywords": pred_lists[idx],
+                "gold_keywords": sorted(gold_lists_norm[idx]),
+                "pred_keywords": pred_lists_norm[idx],
             }
         )
 
@@ -485,10 +486,14 @@ def evaluate_model(
         doc_rows,
         doc_to_gold,
         doc_to_pred_ranked,
+        gold_lists,
+        pred_lists,
     )
 
     # Compute @k metrics using external eval module (stemmed, macro-averaged)
-    at_k_metrics = compute_metrics_at_k_martinc(gold_lists, pred_lists, k_values)
+    at_k_metrics = compute_metrics_at_k_martinc(
+        gold_lists_norm, pred_lists_norm, k_values
+    )
     metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = dict(
         at_k_metrics
     )
