@@ -240,13 +240,23 @@ def test_compute_metrics_at_k_martinc_key_naming():
     assert "num_docs_evaluated" in metrics
 
 
-def test_compute_metrics_at_k_martinc_hyphen_normalization():
-    """Test that hyphenated and space-separated keyphrases match correctly."""
-    gold = [["value based"]]
-    pred = [["value-based"]]
+def test_normalize_keyphrases_hyphen_and_case():
+    """Test that _normalize_keyphrases replaces hyphens with spaces and lowercases."""
+    from keyword_pecker.trainer.validate import _normalize_keyphrases
 
-    metrics = compute_metrics_at_k_martinc(gold, pred, k_values=[5])
+    gold = [["Value Based", "NEURAL NETWORK"]]
+    pred = [["value-based", "neural-network"]]
 
-    # After hyphen normalization, "value-based" and "value based" should match
-    assert metrics["precision@5"] == 1.0
-    assert metrics["recall@5"] == 1.0
+    gold_norm = _normalize_keyphrases(gold)
+    pred_norm = _normalize_keyphrases(pred)
+
+    assert gold_norm == [["value based", "neural network"]]
+    assert pred_norm == [["value based", "neural network"]]
+
+
+def test_normalize_keyphrases_empty():
+    """Test that _normalize_keyphrases handles empty lists."""
+    from keyword_pecker.trainer.validate import _normalize_keyphrases
+
+    assert _normalize_keyphrases([[]]) == [[]]
+    assert _normalize_keyphrases([]) == []
