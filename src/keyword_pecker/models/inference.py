@@ -185,7 +185,7 @@ def _extract_iob_keywords_word_level(
 
         if pred == 1:  # B-tag: start of a new keyphrase
             if keyphrase_words:
-                kp = " ".join(keyphrase_words)
+                kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
                 if scoring_strategy == "ordinal":
                     score = -float(keyphrase_order)
                     keyphrase_order += 1
@@ -204,7 +204,7 @@ def _extract_iob_keywords_word_level(
 
         else:  # O-tag: outside any keyphrase
             if keyphrase_words:
-                kp = " ".join(keyphrase_words)
+                kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
                 if scoring_strategy == "ordinal":
                     score = -float(keyphrase_order)
                     keyphrase_order += 1
@@ -215,7 +215,7 @@ def _extract_iob_keywords_word_level(
                 keyphrase_probs = []
 
     if keyphrase_words:
-        kp = " ".join(keyphrase_words)
+        kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
         if scoring_strategy == "ordinal":
             score = -float(keyphrase_order)
         else:

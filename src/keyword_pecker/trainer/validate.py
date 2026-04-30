@@ -382,8 +382,6 @@ def evaluate_model(
 
     num_batches = len(val_loader)
 
-    breakpoint()
-
     with torch.no_grad():
         for batch in tqdm.tqdm(
             val_loader, desc=f"Evaluating ({split})", total=num_batches

@@ -765,8 +765,8 @@ def test_extract_ranked_keyphrases_with_hyphenated_keyword():
     assert len(results) == 1
     assert len(results[0]) == 1
     keyword, score = results[0][0]
-    # word_list contains hyphens as separate entries, so result is space-joined
-    assert keyword == "state - of - the - art methods"
+    # hyphens are rejoined to their adjacent words
+    assert keyword == "state-of-the-art methods"
     assert score > 0.5
 
 
