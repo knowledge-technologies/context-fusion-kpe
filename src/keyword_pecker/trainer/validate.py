@@ -520,7 +520,15 @@ def evaluate_model(
             wandb_log[f"{split}/precision@{k}"] = at_k_metrics[f"precision@{k}"]
             wandb_log[f"{split}/recall@{k}"] = at_k_metrics[f"recall@{k}"]
             wandb_log[f"{split}/f1@{k}"] = at_k_metrics[f"f1@{k}"]
+
+        # log evaluation metadata
+        wandb_log["num_docs_total"] = at_k_metrics["num_docs_total"]
+        wandb_log["num_docs_removed"] = at_k_metrics["num_docs_removed"]
+        wandb_log["num_docs_evaluated"] = at_k_metrics["num_docs_evaluated"]
+
         wandb.log(wandb_log, step=global_step)
+
+        # log samples too
         samples_table = wandb.Table(
             columns=["doc_id", "doc_row", "gold_keywords", "pred_keywords"],
             data=[
