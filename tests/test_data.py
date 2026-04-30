@@ -182,3 +182,32 @@ def test_extract_word_level_data_batch():
     assert all(0 <= w <= max_wid_1 for w in word_ids[1] if w != -1)
     for wid in range(max_wid_1 + 1):
         _ = word_lists[1][wid]
+
+
+def test_extract_word_level_data_subword_aggregation():
+    """Verify multi-subtoken words are fully reconstructed, not truncated."""
+    sentence = (
+        "This paper describes a method for detecting event trigger words "
+        "in biomedical text based on a word sense disambiguation (WSD) approach."
+    )
+    tokenized = _TOKENIZER([sentence], return_tensors="pt", return_offsets_mapping=True)
+
+    word_ids, word_lists = extract_word_level_data(tokenized, [sentence])
+
+    assert "disambiguation" in word_lists[0], (
+        f"Expected 'disambiguation' in word_list, got: {word_lists[0]}"
+    )
+    assert "di" not in word_lists[0] or word_lists[0].count("di") == 0, (
+        f"'di' should not appear as a separate entry; word_list: {word_lists[0]}"
+    )
+    assert "WSD" in word_lists[0] or "wsd" in word_lists[0], (
+        f"Expected 'WSD'/'wsd' in word_list, got: {word_lists[0]}"
+    )
+    assert "W" not in word_lists[0], (
+        f"'W' should not appear as a separate entry; word_list: {word_lists[0]}"
+    )
+
+    max_wid = max(w for w in word_ids[0] if w != -1)
+    assert len(word_lists[0]) == max_wid + 1
+    for wid in [w for w in word_ids[0] if w >= 0]:
+        _ = word_lists[0][wid]

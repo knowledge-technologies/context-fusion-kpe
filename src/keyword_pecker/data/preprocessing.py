@@ -349,11 +349,15 @@ def extract_word_level_data(
         word_ids_per_sent.append([w if w is not None else -1 for w in wid_list])
 
         offsets = batch_tokenized["offset_mapping"][s_idx]
-        word_map: dict[int, str] = {}
+        word_offsets: dict[int, list[tuple[int, int]]] = {}
         for tok_idx, wid in enumerate(wid_list):
-            if wid is not None and wid not in word_map:
-                char_start, char_end = offsets[tok_idx]
-                word_map[wid] = batch_sentence_strings[s_idx][char_start:char_end]
+            if wid is not None:
+                word_offsets.setdefault(wid, []).append(offsets[tok_idx])
+        word_map = {}
+        for wid, offs in word_offsets.items():
+            char_start = min(o[0] for o in offs)
+            char_end = max(o[1] for o in offs)
+            word_map[wid] = batch_sentence_strings[s_idx][char_start:char_end]
         word_lists_per_sent.append([word_map[i] for i in range(len(word_map))])
 
     return word_ids_per_sent, word_lists_per_sent
