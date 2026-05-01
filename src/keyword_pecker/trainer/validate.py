@@ -42,6 +42,32 @@ def _normalize_keyphrases(keyphrases: list[list[str]]) -> list[list[str]]:
     return [[kw.replace("-", " ").lower() for kw in doc_kws] for doc_kws in keyphrases]
 
 
+def _compute_confusion_matrix(
+    predictions: list[int], targets: list[int], num_classes: int = 3
+) -> list[list[int]]:
+    """Compute confusion matrix from flattened predictions and targets."""
+    cm = [[0] * num_classes for _ in range(num_classes)]
+    for pred, target in zip(predictions, targets):
+        cm[target][pred] += 1
+    return cm
+
+
+def _log_confusion_matrix_to_wandb(
+    cm: list[list[int]],
+    class_labels: list[str],
+    split: str,
+    wandb,
+    global_step: int,
+) -> None:
+    """Log confusion matrix as a W&B Table."""
+    columns = ["actual \\ predicted"] + class_labels
+    data = [[f"actual_{label}"] + row for label, row in zip(class_labels, cm)]
+    wandb.log(
+        {f"{split}/confusion_matrix": wandb.Table(columns=columns, data=data)},
+        step=global_step,
+    )
+
+
 def compute_metrics_at_k(
     gold_keywords: list[set[str]],
     pred_keywords_ranked: list[list[tuple[str, float]]],
@@ -288,6 +314,10 @@ def evaluate_model(
     # Track gold keywords per document (doc_id, doc_row) -> keywords
     doc_to_gold: dict[tuple[str, int], list[str]] = {}
 
+    # Collect token-level predictions/targets for confusion matrix (IOB only)
+    cm_preds: list[int] = []
+    cm_targets: list[int] = []
+
     num_batches = len(val_loader)
 
     with torch.no_grad():
@@ -304,6 +334,13 @@ def evaluate_model(
 
             # Forward pass
             logits = model(input_ids, attention_mask, sentence_counts)
+
+            # Collect confusion matrix data (IOB scheme only)
+            if num_classes == 3:
+                preds = logits.transpose(1, 2).argmax(dim=2)
+                mask = attention_mask.bool()
+                cm_preds.extend(preds[mask].cpu().tolist())
+                cm_targets.extend(target[mask].cpu().tolist())
 
             # Compute masked loss
             if num_classes == 2:
@@ -445,6 +482,17 @@ def evaluate_model(
             ],
         )
         wandb.log({f"{split}/samples": samples_table}, step=global_step)
+
+        # log confusion matrix (IOB scheme only)
+        if num_classes == 3 and cm_preds and cm_targets:
+            cm = _compute_confusion_matrix(cm_preds, cm_targets, num_classes=3)
+            _log_confusion_matrix_to_wandb(
+                cm,
+                class_labels=["O", "B", "I"],
+                split=split,
+                wandb=wandb,
+                global_step=global_step,
+            )
 
     # Restore model to training mode
     model.train()
