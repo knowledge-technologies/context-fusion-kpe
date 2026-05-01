@@ -78,17 +78,3 @@ class BaseEncoder(nn.Module):
         """
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
         return outputs.last_hidden_state
-
-    def get_sentence_embeddings(
-        self, word_embeddings: torch.Tensor, attention_mask: torch.Tensor
-    ) -> torch.Tensor:
-        """Pool word embeddings into sentence embeddings.
-
-        Args:
-            word_embeddings: Word-level embeddings of shape (batch_size, seq_len, d_model).
-            attention_mask: Attention mask of shape (batch_size, seq_len).
-
-        Returns:
-            Sentence embeddings of shape (batch_size, d_model).
-        """
-        return mean_pooling(word_embeddings, attention_mask)
