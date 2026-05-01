@@ -42,8 +42,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--split",
         choices=["valid", "test"],
-        default="val",
-        help="Dataset split to evaluate (default: val)",
+        default="valid",
+        help="Dataset split to evaluate (default: valid)",
     )
     parser.add_argument(
         "--from-config",
