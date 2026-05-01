@@ -43,8 +43,8 @@ class KeyphraseModel(nn.Module):
         """Initialize the keyphrase extraction model.
 
         Args:
-            model_name: HuggingFace model identifier for the base encoder.
-            freeze_encoder: If True, freeze base encoder parameters.
+            base_encoder_name: HuggingFace model identifier for the base encoder.
+            freeze_base_encoder: If True, freeze base encoder parameters.
             d_model: Dimension of the model (should match base encoder).
             nhead: Number of attention heads in refinement head.
             num_layers: Number of transformer layers in refinement head.
