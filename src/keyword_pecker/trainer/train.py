@@ -213,6 +213,8 @@ def train(
 
     global_step = 0
     best_model_state: dict | None = None
+    last_val_metrics: dict | None = None
+    exit_reason = "completed"
 
     metrics_file = metrics_filename.open("a")
 
@@ -353,6 +355,7 @@ def train(
                                 f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
                                 f"at step {early_stopping.best_step})"
                             )
+                            exit_reason = "early_stopping"
                             if (
                                 save_weights
                                 and run_dir is not None
@@ -458,6 +461,7 @@ def train(
                     f"Epoch {epoch + 1} val loss: {val_metrics['val_loss']:.6f}, "
                     f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
                 )
+                last_val_metrics = val_metrics
 
                 if early_stopping is not None and early_stopping_check_every == 0:
                     should_stop = early_stopping(val_metrics, step=global_step)
@@ -473,6 +477,7 @@ def train(
                             f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
                             f"at step {early_stopping.best_step})"
                         )
+                        exit_reason = "early_stopping"
                         if (
                             save_weights
                             and run_dir is not None
@@ -504,5 +509,34 @@ def train(
             torch.save(checkpoint, run_dir / "model.pt")
             logger.info(f"Final model saved to {run_dir / 'model.pt'}")
 
+    except Exception:
+        exit_reason = "error"
+        raise
     finally:
         metrics_file.close()
+
+        if wandb and wandb.run:
+            run_name = wandb.run.name
+            alert_level = (
+                wandb.AlertLevel.WARN
+                if exit_reason == "early_stopping"
+                else wandb.AlertLevel.INFO
+            )
+            if exit_reason == "error":
+                alert_level = wandb.AlertLevel.ERROR
+
+            parts = [f"Training {exit_reason}"]
+            if last_val_metrics is not None:
+                k_val = k_values[0] if k_values else 5
+                parts.append(
+                    f"val_loss={last_val_metrics['val_loss']:.4f}, "
+                    f"F1@{k_val}={last_val_metrics[f'f1@{k_val}']:.4f}"
+                )
+            text = " | ".join(parts)
+
+            wandb.run.alert(
+                title=f"Training {exit_reason}: {run_name}",
+                text=text,
+                wait_duration=300,
+                level=alert_level,
+            )
