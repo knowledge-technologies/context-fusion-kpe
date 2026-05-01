@@ -337,7 +337,7 @@ def evaluate_model(
 
             # Collect confusion matrix data (IOB scheme only)
             if num_classes == 3:
-                preds = logits.transpose(1, 2).argmax(dim=2)
+                preds = logits.argmax(dim=2)
                 mask = attention_mask.bool()
                 cm_preds.extend(preds[mask].cpu().tolist())
                 cm_targets.extend(target[mask].cpu().tolist())
