@@ -18,7 +18,6 @@ import contextlib
 import io
 import json
 import random
-import re
 import types
 from pathlib import Path
 
@@ -38,100 +37,9 @@ from keyword_pecker.utils import get_logger
 logger = get_logger("validate")
 
 
-def extract_keyphrases_from_predictions(
-    predictions: torch.Tensor,
-    input_ids: torch.Tensor,
-    attention_mask: torch.Tensor,
-    tokenizer,
-) -> list[list[str]]:
-    """Extract keyphrase strings from model predictions.
-
-    This function replicates the keyphrase extraction logic from the legacy code
-    (tmp/train-model.py lines 362-397). It converts model logits to binary
-    predictions and decodes the predicted token spans back to keyword strings.
-
-    Args:
-        predictions: Model logits of shape (batch_size, max_seq_len).
-        input_ids: Token IDs of shape (batch_size, max_seq_len).
-        attention_mask: Attention mask of shape (batch_size, max_seq_len).
-        tokenizer: HuggingFace tokenizer for decoding tokens.
-
-    Returns:
-        List of keyword lists, one per sentence in the batch.
-    """
-    batch_size = predictions.shape[0]
-    all_keywords: list[list[str]] = []
-
-    # Binary predictions: logits > 0 means keyword
-    binary_preds = (predictions > 0).long()
-
-    # Mask out padding tokens
-    masked_preds = binary_preds * input_ids
-
-    for i in range(batch_size):
-        # Get sequence length from attention mask
-        seq_len = attention_mask[i].sum().item()
-
-        # Decode predicted keyword tokens
-        # Skip BOS (index 0) and EOS (last token before padding)
-        # The legacy code uses res[i, 1 : len(row.sent_tokens) - 1]
-        pred_tokens = masked_preds[i, 1 : seq_len - 1]
-
-        # Decode to string - predicted tokens are split by separator token (<s>)
-        decoded = tokenizer.decode(pred_tokens)
-
-        # Split by separator and clean up
-        # Legacy pattern: split by "<s>", strip whitespace, normalize " - " to "-"
-        keywords = decoded.split("<s>")
-        keywords = [re.sub(r" - ", "-", kw.strip()) for kw in keywords if kw.strip()]
-
-        all_keywords.append(keywords)
-
-    return all_keywords
-
-
-def _normalize_keyphrases(keyphrases: list[str]) -> list[str]:
-    """Remove hyphens and lowercase"""
+def _normalize_keyphrases(keyphrases: list[list[str]]) -> list[list[str]]:
+    """Remove hyphens and lowercase."""
     return [[kw.replace("-", " ").lower() for kw in doc_kws] for doc_kws in keyphrases]
-
-
-def compute_keyphrase_metrics(
-    gold_keywords: list[set[str]],
-    pred_keywords: list[set[str]],
-) -> dict[str, float]:
-    """Compute precision, recall, and F1 using exact set matching.
-
-    .. deprecated::
-        Use :func:`compute_metrics_at_k_external` instead, which uses Porter
-        stemming and macro-averaging to match prior benchmark evaluations.
-
-    This function replicates the metrics computation from the legacy code
-    (tmp/train-model.py lines 404-414).
-
-    Args:
-        gold_keywords: List of gold keyword sets, one per document.
-        pred_keywords: List of predicted keyword sets, one per document.
-
-    Returns:
-        dict with keys: precision, recall, f1
-    """
-    tp = fp = fn = 0
-
-    for gold, pred in zip(gold_keywords, pred_keywords):
-        tp += len(gold & pred)
-        fp += len(pred - gold)
-        fn += len(gold - pred)
-
-    # Avoid division by zero
-    precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
-
-    return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-    }
 
 
 def compute_metrics_at_k(
