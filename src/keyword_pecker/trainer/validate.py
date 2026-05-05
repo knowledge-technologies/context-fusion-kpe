@@ -206,10 +206,10 @@ def evaluate_model(
     global_step: int = 0,
     epoch: int = 0,
     sample_seed: int = 42,
-    max_keyphrases: int = 10,
     max_keyphrase_length: int = 5,
     scoring_strategy: str = "confidence",
     score_method: str = "average",
+    iob_threshold: float = 0.5,
     filter_punctuation: bool = True,
     disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
     dedup_strategy: str = "stem",
@@ -248,6 +248,8 @@ def evaluate_model(
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
         scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
         score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").
+        iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
+            Predictions below this threshold are treated as O. Default 0.5.
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters (default: True).
         disallowed_punctuation: String of punctuation characters to filter from
@@ -364,6 +366,7 @@ def evaluate_model(
                 score_method=score_method,
                 word_ids=batch.get("word_ids"),
                 word_lists=batch.get("word_lists"),
+                iob_threshold=iob_threshold,
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 

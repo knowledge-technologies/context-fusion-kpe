@@ -157,6 +157,7 @@ def _extract_iob_keywords_word_level(
     word_list: list[str],
     scoring_strategy: str = "confidence",
     score_method: str = "average",
+    iob_threshold: float = 0.5,
 ) -> list[tuple[str, float]]:
     """Extract keyphrases from word-level IOB predictions.
 
@@ -169,6 +170,8 @@ def _extract_iob_keywords_word_level(
         word_list: The actual word strings, indexed to match word_preds.
         scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order.
         score_method: How to aggregate word probs ("average", "max", "min", "geometric").
+        iob_threshold: Minimum confidence for B/I predictions to be accepted.
+            Predictions below this threshold are treated as O.
 
     Returns:
         List of (keyphrase, score) tuples. No deduplication — handled at
@@ -183,7 +186,7 @@ def _extract_iob_keywords_word_level(
         pred = word_preds[idx]
         prob = word_probs[idx]
 
-        if pred == 1:  # B-tag: start of a new keyphrase
+        if pred == 1 and prob >= iob_threshold:  # B-tag: start of a new keyphrase
             if keyphrase_words:
                 kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
                 if scoring_strategy == "ordinal":
@@ -198,11 +201,13 @@ def _extract_iob_keywords_word_level(
             keyphrase_words.append(word_list[idx])
             keyphrase_probs.append(prob)
 
-        elif pred == 2:  # I-tag: continuation of current keyphrase
+        elif (
+            pred == 2 and prob >= iob_threshold
+        ):  # I-tag: continuation of current keyphrase
             keyphrase_words.append(word_list[idx])
             keyphrase_probs.append(prob)
 
-        else:  # O-tag: outside any keyphrase
+        else:  # O-tag or low-confidence B/I: outside any keyphrase
             if keyphrase_words:
                 kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
                 if scoring_strategy == "ordinal":
@@ -234,6 +239,7 @@ def _decode_iob_keyphrases(
     score_method: str = "average",
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
+    iob_threshold: float = 0.5,
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from IOB predictions using argmax + B/I/O decoding.
 
@@ -249,6 +255,8 @@ def _decode_iob_keyphrases(
         score_method: How to aggregate token probs ("average", "max", "min", or "geometric").
         word_ids: Optional (batch_size, max_seq_len) tensor mapping tokens to word indices.
         word_lists: Optional list of word lists, one per batch item.
+        iob_threshold: Minimum confidence for B/I predictions to be accepted.
+            Predictions below this threshold are treated as O.
 
     Returns:
         List of keyword lists with confidence scores, one per sentence.
@@ -278,6 +286,7 @@ def _decode_iob_keyphrases(
                 word_lists[i],
                 scoring_strategy,
                 score_method,
+                iob_threshold,
             )
         else:
             # Fallback: subword-level extraction (backward compatibility)
@@ -295,7 +304,7 @@ def _decode_iob_keyphrases(
                 pred = token_preds[j].item()
                 prob = (1.0 - token_probs[j, 0]).item()
 
-                if pred == 1:
+                if pred == 1 and prob >= iob_threshold:
                     if current_tokens:
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
@@ -312,7 +321,7 @@ def _decode_iob_keyphrases(
                     current_tokens = [int(token_ids[j].item())]
                     current_probs = [prob]
 
-                elif pred == 2:
+                elif pred == 2 and prob >= iob_threshold:
                     if current_tokens:
                         current_tokens.append(int(token_ids[j].item()))
                         current_probs.append(prob)
@@ -366,12 +375,14 @@ def extract_ranked_keyphrases(
     score_method: str = "average",
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
+    iob_threshold: float = 0.5,
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases ranked by model confidence.
 
     Supports both binary and IOB classification schemes:
     - Binary (num_classes=2): Uses sigmoid + 0.5 threshold
-    - IOB (num_classes=3): Uses argmax to decode B/I/O tags
+    - IOB (num_classes=3): Uses argmax to decode B/I/O tags, with configurable
+      confidence threshold (iob_threshold) to filter low-confidence predictions.
 
     Args:
         predictions: Model logits.
@@ -386,6 +397,8 @@ def extract_ranked_keyphrases(
             Only used for IOB scheme.
         word_lists: Optional list of word lists, one per batch item.
             Only used for IOB scheme.
+        iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
+            Predictions below this threshold are treated as O. Default 0.5.
 
     Returns:
         List of keyword lists with confidence scores, one per sentence.
@@ -414,6 +427,7 @@ def extract_ranked_keyphrases(
             score_method,
             word_ids=word_ids,
             word_lists=word_lists,
+            iob_threshold=iob_threshold,
         )
 
 
@@ -573,6 +587,7 @@ def predict_keyphrases(
     nr_keyphrases: int | None = None,
     scoring_strategy: str = "confidence",
     score_method: str = "average",
+    iob_threshold: float = 0.5,
     return_scores: bool = False,
 ) -> list[str] | list[KeyphraseResult]:
     """Extract keyphrases from text using a trained KeyphraseModel.
@@ -591,6 +606,10 @@ def predict_keyphrases(
         device: Device for inference. If None, uses the device of model parameters.
         nr_keyphrases: Maximum number of keyphrases to return. If None, uses
             the default from evaluation config (typically 10).
+        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order.
+        score_method: How to aggregate token probs ("average", "max", "min", "geometric").
+        iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
+            Predictions below this threshold are treated as O. Default 0.5.
         return_scores: If True, returns list of KeyphraseResult with confidence
             scores. If False, returns list of keyphrase strings only.
 
@@ -662,6 +681,7 @@ def predict_keyphrases(
         score_method=score_method,
         word_ids=padded_word_ids.to(device),
         word_lists=word_lists,
+        iob_threshold=iob_threshold,
     )
 
     # Aggregate to document level with filtering, deduplication, and capping
