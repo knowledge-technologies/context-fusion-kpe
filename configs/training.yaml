@@ -4,14 +4,14 @@ training:
   outer_batch_size: 80              # sentences per gradient accumulation unit
   inner_batch_size: 40               # sentences per forward pass
   val_batch_size: 100                # batch size for validation
-  base_lr: 2.0e-5                    # learning rate for base encoder parameters
-  head_lr: 5.0e-5                    # learning rate for refinement head parameters
+  base_lr: 5.0e-6                    # learning rate for base encoder parameters
+  head_lr: 1.0e-5                    # learning rate for refinement head parameters
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
-  use_class_weights: false           # whether to apply class weights in loss (false = equal weighting, like legacy)
-  warmup_ratio: 0.1                  # fraction of training steps for warmup
-  use_scheduler: false                # whether to use a learning rate scheduler
-  log_every: 500                     # log loss every N optimizer steps
+  use_class_weights: true           # whether to apply class weights in loss (false = equal weighting, like legacy)
+  warmup_ratio: 0.01                  # fraction of training steps for warmup
+  use_scheduler: true                # whether to use a learning rate scheduler
+  log_every: 100                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
   k_values: [5, 10, "N", "M"]        # k values for @k metrics (N = num gold, M = num pred)
   early_stopping_patience: 5         # 0 = disabled, N = stop after N epochs without improvement
@@ -27,9 +27,9 @@ evaluation:
   # Copied from legacy TNT-KID eval code. Only dash (-) is allowed. Note: apostrophe
   # (') IS included (filtered), which differs from the TNT-KID paper that says
   # apostrophes should be kept. We keep legacy behavior for reproducible comparisons.
-  disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+  disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[\\]^_`{|}~"
   dedup_strategy: "stem"                  # "stem" (legacy) or "lowercase"
-  scoring_strategy: "ordinal"              # "confidence" (model probabilities) or "ordinal" (extraction order)
+  scoring_strategy: "confidence"              # "confidence" (model probabilities) or "ordinal" (extraction order)
   score_method: "average"                  # "average", "max", "min", "geometric", (only applies when `scoring_strategy = 'confidence'`)
 
 wandb:
