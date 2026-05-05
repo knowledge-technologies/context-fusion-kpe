@@ -18,6 +18,7 @@ from pathlib import Path
 import polars as pl
 import torch
 
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model
@@ -135,7 +136,7 @@ def load_eval_config(args: argparse.Namespace) -> dict:
             "score_method": eval_cfg.get("score_method", "average"),
             "filter_punctuation": eval_cfg.get("filter_punctuation", True),
             "disallowed_punctuation": eval_cfg.get(
-                "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+                "disallowed_punctuation", DEFAULT_DISALLOWED_PUNCTUATION
             ),
             "dedup_strategy": eval_cfg.get("dedup_strategy", "stem"),
         }
@@ -150,7 +151,7 @@ def load_eval_config(args: argparse.Namespace) -> dict:
         "scoring_strategy": args.scoring_strategy,
         "score_method": args.score_method,
         "filter_punctuation": True,
-        "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+        "disallowed_punctuation": DEFAULT_DISALLOWED_PUNCTUATION,
         "dedup_strategy": "stem",
     }
 
