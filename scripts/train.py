@@ -253,6 +253,9 @@ def main() -> None:
 
     device = torch.device(hyperparams["device"])
 
+    # log code state to config
+    hyperparams["commit_hash"] = GIT_COMMIT
+
     # Single W&B setup call. Returns (wandb_module, run_name) — wandb_module is
     # None if W&B is disabled or not installed. run_name is used for the local
     # run directory in both cases.
@@ -265,8 +268,6 @@ def main() -> None:
         notes=wandb_config.get("notes", ""),
     )
 
-    # log code state
-    wandb.log({"commit_hash": GIT_COMMIT})
     logger.info(f"Commit hash: {GIT_COMMIT}")
 
     # Set up local run directory and files
