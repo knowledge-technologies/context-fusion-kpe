@@ -244,8 +244,6 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
-        max_keyphrases: Deprecated. Metrics are now computed on uncapped
-            predictions; @k metrics handle their own cutoff internally.
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
         scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
         score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").

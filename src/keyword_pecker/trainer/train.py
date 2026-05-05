@@ -56,7 +56,6 @@ def train(
     early_stopping_metric: str = "val_loss",
     early_stopping_mode: str = "min",
     early_stopping_check_every: int = 0,
-    max_keyphrases: int = 10,
     max_keyphrase_length: int = 5,
     scoring_strategy: str = "confidence",
     score_method: str = "average",
@@ -106,7 +105,6 @@ def train(
         early_stopping_metric: Metric name to monitor (e.g., "val_loss", "f1@5").
         early_stopping_mode: "min" for lower-is-better, "max" for higher-is-better.
         early_stopping_check_every: Run validation every N optimizer steps (0 = epoch-only).
-        max_keyphrases: Maximum number of keyphrases per document (default: 10).
         max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
         scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
         score_method: How to aggregate token probabilities ("average", "max", "min", "geometric") (default: "average").
@@ -329,7 +327,6 @@ def train(
                             wandb=wandb,
                             global_step=global_step,
                             epoch=epoch + 1,
-                            max_keyphrases=max_keyphrases,
                             max_keyphrase_length=max_keyphrase_length,
                             scoring_strategy=scoring_strategy,
                             score_method=score_method,
@@ -449,7 +446,6 @@ def train(
                     wandb=wandb,
                     global_step=global_step,
                     epoch=epoch + 1,
-                    max_keyphrases=max_keyphrases,
                     max_keyphrase_length=max_keyphrase_length,
                     scoring_strategy=scoring_strategy,
                     score_method=score_method,
