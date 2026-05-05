@@ -1,23 +1,23 @@
 training:
   seed: 54321                        # random seed for reproducibility
-  epochs: 10
+  epochs: 5
   outer_batch_size: 80              # sentences per gradient accumulation unit
   inner_batch_size: 40               # sentences per forward pass
   val_batch_size: 100                # batch size for validation
-  base_lr: 5.0e-6                    # learning rate for base encoder parameters
-  head_lr: 1.0e-5                    # learning rate for refinement head parameters
+  base_lr: 2e-5                    # learning rate for base encoder parameters
+  head_lr: 5e-5                    # learning rate for refinement head parameters
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
   use_class_weights: true           # whether to apply class weights in loss (false = equal weighting, like legacy)
   warmup_ratio: 0.01                  # fraction of training steps for warmup
   use_scheduler: true                # whether to use a learning rate scheduler
-  log_every: 100                     # log loss every N optimizer steps
+  log_every: 500                     # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
   k_values: [5, 10, "N", "M"]        # k values for @k metrics (N = num gold, M = num pred)
-  early_stopping_patience: 7         # 0 = disabled, N = stop after N checks without improvement
+  early_stopping_patience: 0         # 0 = disabled, N = stop after N checks without improvement
   early_stopping_delta: 0.005        # minimum improvement to reset patience counter
-  early_stopping_metric: "f1@10"     # metric to monitor
-  early_stopping_mode: "max"         # "min" for loss, "max" for F1/accuracy
+  early_stopping_metric: "val_loss"  # metric to monitor
+  early_stopping_mode: "min"         # "min" for loss, "max" for F1/accuracy
   early_stopping_check_every: 500   # check every 500 steps
 
 evaluation:
