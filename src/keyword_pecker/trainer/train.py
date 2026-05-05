@@ -309,8 +309,7 @@ def train(
                     progress.update(1)
 
                     if (
-                        early_stopping is not None
-                        and early_stopping_check_every > 0
+                        early_stopping_check_every > 0
                         and global_step % early_stopping_check_every == 0
                         and val_df is not None
                     ):
@@ -341,8 +340,6 @@ def train(
                             f"F1@{k_val}: {val_metrics[f'f1@{k_val}']:.4f}"
                         )
 
-                        should_stop = early_stopping(val_metrics, step=global_step)
-
                         current_score = val_metrics.get(early_stopping_metric)
                         if current_score is not None:
                             if (
@@ -361,36 +358,39 @@ def train(
                                     k: v.cpu() for k, v in model.state_dict().items()
                                 }
 
-                        if should_stop:
-                            logger.info(
-                                f"Early stopping triggered at step {global_step} "
-                                f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
-                                f"at step {early_stopping.best_step})"
-                            )
-                            exit_reason = "early_stopping"
-                            if (
-                                save_weights
-                                and run_dir is not None
-                                and best_model_state is not None
-                            ):
-                                checkpoint = {
-                                    "state_dict": best_model_state,
-                                    "metadata": {
-                                        "num_classes": num_classes,
-                                        "scheme": "IOB"
-                                        if num_classes == 3
-                                        else "binary",
-                                        "class_weights": class_weights,
-                                        "class_frequencies": class_frequencies,
-                                    },
-                                }
-                                torch.save(checkpoint, run_dir / "model.pt")
+                        if early_stopping is not None:
+                            should_stop = early_stopping(val_metrics, step=global_step)
+
+                            if should_stop:
                                 logger.info(
-                                    f"Best model saved to {run_dir / 'model.pt'}"
+                                    f"Early stopping triggered at step {global_step} "
+                                    f"(best {early_stopping_metric}: {early_stopping.best_score:.6f} "
+                                    f"at step {early_stopping.best_step})"
                                 )
-                            progress.close()
-                            metrics_file.close()
-                            return
+                                exit_reason = "early_stopping"
+                                if (
+                                    save_weights
+                                    and run_dir is not None
+                                    and best_model_state is not None
+                                ):
+                                    checkpoint = {
+                                        "state_dict": best_model_state,
+                                        "metadata": {
+                                            "num_classes": num_classes,
+                                            "scheme": "IOB"
+                                            if num_classes == 3
+                                            else "binary",
+                                            "class_weights": class_weights,
+                                            "class_frequencies": class_frequencies,
+                                        },
+                                    }
+                                    torch.save(checkpoint, run_dir / "model.pt")
+                                    logger.info(
+                                        f"Best model saved to {run_dir / 'model.pt'}"
+                                    )
+                                progress.close()
+                                metrics_file.close()
+                                return
 
             # Remainder handling: process leftover samples that don't fill a complete outer batch
             # This ensures we don't lose gradients on the final partial batch
