@@ -25,6 +25,7 @@ import polars as pl
 import torch
 from dotenv import load_dotenv
 
+from keyword_pecker import GIT_COMMIT
 from keyword_pecker.data import compute_class_weights, get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model, train
@@ -265,6 +266,10 @@ def main() -> None:
         tags=wandb_config.get("tags") or [],
         notes=wandb_config.get("notes", ""),
     )
+
+    # log code state
+    wandb.log({"commit_hash": GIT_COMMIT})
+    logger.info(f"Commit hash: {GIT_COMMIT}")
 
     # Set up local run directory and files
     run_dir = init_run_dir(run_name)
