@@ -410,6 +410,7 @@ def evaluate_model(
     gold_lists_norm = _normalize_keyphrases(keyphrases=gold_lists)
     pred_lists_norm = _normalize_keyphrases(keyphrases=pred_lists)
 
+    _N_SAMPLES = 10
     # Capture random samples for qualitative analysis
     num_samples = min(15, len(doc_keys))
     rng = random.Random(sample_seed)
@@ -422,7 +423,7 @@ def evaluate_model(
                 "doc_id": doc_key[0],
                 "doc_row": doc_key[1],
                 "gold_keywords": sorted(gold_lists_norm[idx]),
-                "pred_keywords": pred_lists_norm[idx],
+                "pred_keywords": pred_lists_norm[idx][:_N_SAMPLES],
             }
         )
 
