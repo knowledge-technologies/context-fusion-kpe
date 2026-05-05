@@ -17,6 +17,7 @@ from pathlib import Path
 import polars as pl
 import torch
 
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model
@@ -81,6 +82,20 @@ def parse_args() -> argparse.Namespace:
         help="k values for @k metrics: N = num gold, M = num pred (default: 5 10 N M)",
     )
     parser.add_argument(
+        "--scoring-strategy",
+        type=str,
+        default="confidence",
+        choices=["confidence", "ordinal"],
+        help="Scoring strategy (default: confidence)",
+    )
+    parser.add_argument(
+        "--score-method",
+        type=str,
+        default="average",
+        choices=["average", "max", "min", "geometric"],
+        help="Score aggregation method (default: average)",
+    )
+    parser.add_argument(
         "--output",
         help="Output JSON file path (auto-generated if not provided)",
     )
@@ -103,7 +118,7 @@ def load_eval_config(args: argparse.Namespace) -> dict:
             "score_method": eval_cfg.get("score_method", "average"),
             "filter_punctuation": eval_cfg.get("filter_punctuation", True),
             "disallowed_punctuation": eval_cfg.get(
-                "disallowed_punctuation", "!#$%&'()*+,.:;<=>?@[]^_`{|}~"
+                "disallowed_punctuation", DEFAULT_DISALLOWED_PUNCTUATION
             ),
             "dedup_strategy": eval_cfg.get("dedup_strategy", "stem"),
         }
@@ -114,10 +129,10 @@ def load_eval_config(args: argparse.Namespace) -> dict:
         "num_classes": args.num_classes,
         "k_values": args.k_values,
         "max_keyphrase_length": 5,
-        "scoring_strategy": "confidence",
-        "score_method": "average",
+        "scoring_strategy": args.scoring_strategy,
+        "score_method": args.score_method,
         "filter_punctuation": True,
-        "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+        "disallowed_punctuation": DEFAULT_DISALLOWED_PUNCTUATION,
         "dedup_strategy": "stem",
     }
 

@@ -100,6 +100,20 @@ def parse_args() -> argparse.Namespace:
         default=[5, 10, "N", "M"],
         help="k values for @k metrics: N = num gold, M = num pred (default: 5 10 N M)",
     )
+    parser.add_argument(
+        "--scoring-strategy",
+        type=str,
+        default="confidence",
+        choices=["confidence", "ordinal"],
+        help="Scoring strategy (default: confidence)",
+    )
+    parser.add_argument(
+        "--score-method",
+        type=str,
+        default="average",
+        choices=["average", "max", "min", "geometric"],
+        help="Score aggregation method (default: average)",
+    )
     return parser.parse_args()
 
 
@@ -133,8 +147,8 @@ def load_eval_config(args: argparse.Namespace) -> dict:
         "num_classes": args.num_classes,
         "k_values": args.k_values,
         "max_keyphrase_length": 5,
-        "scoring_strategy": "confidence",
-        "score_method": "average",
+        "scoring_strategy": args.scoring_strategy,
+        "score_method": args.score_method,
         "filter_punctuation": True,
         "disallowed_punctuation": "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
         "dedup_strategy": "stem",
