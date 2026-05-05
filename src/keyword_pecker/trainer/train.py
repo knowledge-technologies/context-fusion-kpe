@@ -212,6 +212,7 @@ def train(
 
     global_step = 0
     best_model_state: dict | None = None
+    best_val_score: float | None = None
     last_val_metrics: dict | None = None
     exit_reason = "completed"
 
@@ -342,10 +343,23 @@ def train(
 
                         should_stop = early_stopping(val_metrics, step=global_step)
 
-                        if early_stopping.best_step == global_step:
-                            best_model_state = {
-                                k: v.cpu() for k, v in model.state_dict().items()
-                            }
+                        current_score = val_metrics.get(early_stopping_metric)
+                        if current_score is not None:
+                            if (
+                                best_val_score is None
+                                or (
+                                    early_stopping_mode == "min"
+                                    and current_score < best_val_score
+                                )
+                                or (
+                                    early_stopping_mode == "max"
+                                    and current_score > best_val_score
+                                )
+                            ):
+                                best_val_score = current_score
+                                best_model_state = {
+                                    k: v.cpu() for k, v in model.state_dict().items()
+                                }
 
                         if should_stop:
                             logger.info(
@@ -460,13 +474,26 @@ def train(
                 )
                 last_val_metrics = val_metrics
 
-                if early_stopping is not None and early_stopping_check_every == 0:
-                    should_stop = early_stopping(val_metrics, step=global_step)
-
-                    if early_stopping.best_step == global_step:
+                current_score = val_metrics.get(early_stopping_metric)
+                if current_score is not None:
+                    if (
+                        best_val_score is None
+                        or (
+                            early_stopping_mode == "min"
+                            and current_score < best_val_score
+                        )
+                        or (
+                            early_stopping_mode == "max"
+                            and current_score > best_val_score
+                        )
+                    ):
+                        best_val_score = current_score
                         best_model_state = {
                             k: v.cpu() for k, v in model.state_dict().items()
                         }
+
+                if early_stopping is not None and early_stopping_check_every == 0:
+                    should_stop = early_stopping(val_metrics, step=global_step)
 
                     if should_stop:
                         logger.info(
@@ -494,6 +521,19 @@ def train(
                         break
 
         if save_weights and run_dir is not None:
+            if best_model_state is not None:
+                best_checkpoint = {
+                    "state_dict": best_model_state,
+                    "metadata": {
+                        "num_classes": num_classes,
+                        "scheme": "IOB" if num_classes == 3 else "binary",
+                        "class_weights": class_weights,
+                        "class_frequencies": class_frequencies,
+                    },
+                }
+                torch.save(best_checkpoint, run_dir / "model_best.pt")
+                logger.info(f"Best model saved to {run_dir / 'model_best.pt'}")
+
             checkpoint = {
                 "state_dict": model.state_dict(),
                 "metadata": {
