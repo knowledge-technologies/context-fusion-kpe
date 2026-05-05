@@ -14,6 +14,7 @@ import spacy
 import torch
 from nltk.stem.porter import PorterStemmer
 
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import extract_word_level_data, load_spacy_model
 from .keyphrase_model import KeyphraseModel
 
@@ -431,13 +432,6 @@ def extract_ranked_keyphrases(
         )
 
 
-# Punctuation characters to disallow in keyphrases.
-# Copied exactly from the legacy TNT-KID eval code (train_and_eval.py line 858).
-# NOTE: This includes apostrophe ('), which contradicts the original TNT-KID paper
-# stating "we remove keyphrases containing punctuation (except dashes and apostrophes)".
-# We keep the legacy behavior as-is for reproducible evaluation comparisons.
-_DEFAULT_DISALLOWED_PUNCTUATION = "!#$%&'()*+,.:;<=>?@[\\]^_`{|}~"
-
 _stemmer = PorterStemmer()
 
 
@@ -471,7 +465,7 @@ def aggregate_document_keyphrases(
     max_keyphrases: int | None = 10,
     max_keyphrase_length: int = 5,
     filter_punctuation: bool = True,
-    disallowed_punctuation: str = _DEFAULT_DISALLOWED_PUNCTUATION,
+    disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
 ) -> dict[tuple[str, int], list[tuple[str, float]]]:
     """Aggregate sentence-level keyphrase predictions to document level.

@@ -25,6 +25,7 @@ import polars as pl
 import torch
 import tqdm
 
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.models.inference import (
@@ -211,7 +212,7 @@ def evaluate_model(
     score_method: str = "average",
     iob_threshold: float = 0.5,
     filter_punctuation: bool = True,
-    disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+    disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
 ) -> dict[str, float | list[dict[str, str | int | list[str]]]]:
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.

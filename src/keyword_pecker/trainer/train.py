@@ -17,6 +17,7 @@ import torch
 import tqdm
 from transformers import get_linear_schedule_with_warmup
 
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import compute_class_weights, create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer.early_stopping import EarlyStopping
@@ -60,7 +61,7 @@ def train(
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     filter_punctuation: bool = True,
-    disallowed_punctuation: str = "!#$%&'()*+,.:;<=>?@[]^_`{|}~",
+    disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
     seed: int = 42,
 ) -> None:
