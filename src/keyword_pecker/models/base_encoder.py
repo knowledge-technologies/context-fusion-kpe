@@ -32,7 +32,7 @@ class BaseEncoder(nn.Module):
     Supports freezing/unfreezing for differential learning rate training.
     """
 
-    DEFAULT_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
+    DEFAULT_MODEL_NAME = "answerdotai/ModernBERT-base"
 
     def __init__(
         self,

@@ -1,5 +1,5 @@
 keyphrase_model:
-  base_encoder_name: "sentence-transformers/all-mpnet-base-v2"
+  base_encoder_name: "answerdotai/ModernBERT-base"
   freeze_base_encoder: false
   d_model: 768
   nhead: 4
