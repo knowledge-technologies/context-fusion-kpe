@@ -307,7 +307,6 @@ def main() -> None:
             num_classes=hyperparams["num_classes"],
             use_class_weights=use_class_weights,
             class_weights=hyperparams.get("class_weights"),
-            class_frequencies=hyperparams.get("class_frequencies"),
             warmup_ratio=hyperparams["warmup_ratio"],
             use_scheduler=hyperparams.get("use_scheduler", True),
             log_every=hyperparams["log_every"],
