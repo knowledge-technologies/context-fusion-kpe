@@ -27,6 +27,29 @@ from keyword_pecker.utils import get_logger, set_random_seeds
 logger = get_logger("train")
 
 
+def _save_checkpoint(
+    state_dict: dict,
+    run_dir: Path,
+    filename: str,
+    num_classes: int,
+    class_weights: list[float] | None,
+    best_step: int | None = None,
+) -> None:
+    """Save a model checkpoint with minimal metadata."""
+    metadata: dict = {
+        "num_classes": num_classes,
+        "class_weights": class_weights,
+    }
+    if best_step is not None:
+        metadata["best_step"] = best_step
+    checkpoint = {
+        "state_dict": state_dict,
+        "metadata": metadata,
+    }
+    torch.save(checkpoint, run_dir / filename)
+    logger.info(f"Model saved to {run_dir / filename}")
+
+
 def train(
     model: KeyphraseModel,
     train_df: pl.DataFrame,
@@ -39,7 +62,6 @@ def train(
     num_classes: int = 3,
     use_class_weights: bool = True,
     class_weights: list[float] | None = None,
-    class_frequencies: list[float] | None = None,
     log_every: int,
     device: torch.device,
     metrics_filename: Path,
@@ -87,8 +109,6 @@ def train(
         class_weights: Optional class weights for loss function. If None and
             use_class_weights=True, computed from training data for IOB scheme,
             or defaults to [1.0, 5.0] for binary.
-        class_frequencies: Optional class frequencies (percentages). If None, computed
-            from training data alongside class weights.
         log_every: Print loss every this many optimizer steps.
         device: Device to run on.
         metrics_filename: Path to the JSONL file where metrics are appended.
@@ -156,11 +176,7 @@ def train(
         # IOB classification: CrossEntropyLoss with optional class weights
         if use_class_weights:
             if class_weights is None:
-                class_weights, class_frequencies = compute_class_weights(
-                    train_df, num_classes
-                )
-            else:
-                class_frequencies = None
+                class_weights, _ = compute_class_weights(train_df, num_classes)
             class_weights_tensor = torch.tensor(
                 class_weights, dtype=torch.float32, device=device
             )
@@ -213,6 +229,7 @@ def train(
     global_step = 0
     best_model_state: dict | None = None
     best_val_score: float | None = None
+    best_step: int | None = None
     last_val_metrics: dict | None = None
     exit_reason = "completed"
 
@@ -354,9 +371,19 @@ def train(
                                 )
                             ):
                                 best_val_score = current_score
+                                best_step = global_step
                                 best_model_state = {
                                     k: v.cpu() for k, v in model.state_dict().items()
                                 }
+                                if save_weights and run_dir is not None:
+                                    _save_checkpoint(
+                                        best_model_state,
+                                        run_dir,
+                                        "model_best.pt",
+                                        num_classes,
+                                        class_weights,
+                                        best_step=best_step,
+                                    )
 
                         if early_stopping is not None:
                             should_stop = early_stopping(val_metrics, step=global_step)
@@ -368,26 +395,6 @@ def train(
                                     f"at step {early_stopping.best_step})"
                                 )
                                 exit_reason = "early_stopping"
-                                if (
-                                    save_weights
-                                    and run_dir is not None
-                                    and best_model_state is not None
-                                ):
-                                    checkpoint = {
-                                        "state_dict": best_model_state,
-                                        "metadata": {
-                                            "num_classes": num_classes,
-                                            "scheme": "IOB"
-                                            if num_classes == 3
-                                            else "binary",
-                                            "class_weights": class_weights,
-                                            "class_frequencies": class_frequencies,
-                                        },
-                                    }
-                                    torch.save(checkpoint, run_dir / "model.pt")
-                                    logger.info(
-                                        f"Best model saved to {run_dir / 'model.pt'}"
-                                    )
                                 progress.close()
                                 metrics_file.close()
                                 return
@@ -488,9 +495,19 @@ def train(
                         )
                     ):
                         best_val_score = current_score
+                        best_step = global_step
                         best_model_state = {
                             k: v.cpu() for k, v in model.state_dict().items()
                         }
+                        if save_weights and run_dir is not None:
+                            _save_checkpoint(
+                                best_model_state,
+                                run_dir,
+                                "model_best.pt",
+                                num_classes,
+                                class_weights,
+                                best_step=best_step,
+                            )
 
                 if early_stopping is not None and early_stopping_check_every == 0:
                     should_stop = early_stopping(val_metrics, step=global_step)
@@ -502,49 +519,16 @@ def train(
                             f"at step {early_stopping.best_step})"
                         )
                         exit_reason = "early_stopping"
-                        if (
-                            save_weights
-                            and run_dir is not None
-                            and best_model_state is not None
-                        ):
-                            checkpoint = {
-                                "state_dict": best_model_state,
-                                "metadata": {
-                                    "num_classes": num_classes,
-                                    "scheme": "IOB" if num_classes == 3 else "binary",
-                                    "class_weights": class_weights,
-                                    "class_frequencies": class_frequencies,
-                                },
-                            }
-                            torch.save(checkpoint, run_dir / "model.pt")
-                            logger.info(f"Best model saved to {run_dir / 'model.pt'}")
                         break
 
         if save_weights and run_dir is not None:
-            if best_model_state is not None:
-                best_checkpoint = {
-                    "state_dict": best_model_state,
-                    "metadata": {
-                        "num_classes": num_classes,
-                        "scheme": "IOB" if num_classes == 3 else "binary",
-                        "class_weights": class_weights,
-                        "class_frequencies": class_frequencies,
-                    },
-                }
-                torch.save(best_checkpoint, run_dir / "model_best.pt")
-                logger.info(f"Best model saved to {run_dir / 'model_best.pt'}")
-
-            checkpoint = {
-                "state_dict": model.state_dict(),
-                "metadata": {
-                    "num_classes": num_classes,
-                    "scheme": "IOB" if num_classes == 3 else "binary",
-                    "class_weights": class_weights,
-                    "class_frequencies": class_frequencies,
-                },
-            }
-            torch.save(checkpoint, run_dir / "model.pt")
-            logger.info(f"Final model saved to {run_dir / 'model.pt'}")
+            _save_checkpoint(
+                model.state_dict(),
+                run_dir,
+                "model.pt",
+                num_classes,
+                class_weights,
+            )
 
     except Exception:
         exit_reason = "error"
