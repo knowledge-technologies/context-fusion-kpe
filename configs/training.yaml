@@ -8,10 +8,10 @@ training:
   head_lr: 5.0e-5                    # learning rate for refinement head parameters
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
-  use_class_weights: true           # whether to apply class weights in loss (false = equal weighting, like legacy)
-  warmup_ratio: 0.01                  # fraction of training steps for warmup
-  use_scheduler: true                # whether to use a learning rate scheduler
-  log_every: 500                     # log loss every N optimizer steps
+  use_class_weights: true            # whether to apply class weights in loss (false = equal weighting, like legacy)
+  warmup_ratio: 0.01                 # fraction of training steps for warmup
+  use_scheduler: false               # whether to use a learning rate scheduler
+  log_every: 1000                    # log loss every N optimizer steps
   device: cuda                       # device to use (cpu or cuda)
   k_values: [5, 10, "N", "M"]        # k values for @k metrics (N = num gold, M = num pred)
   early_stopping_patience: 20        # 0 = disabled, N = stop after N checks without improvement
