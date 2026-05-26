@@ -463,7 +463,6 @@ def aggregate_document_keyphrases(
     doc_ids: list[str],
     doc_rows: list[int],
     max_keyphrases: int | None = 10,
-    max_keyphrase_length: int = 5,
     filter_punctuation: bool = True,
     disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
@@ -475,10 +474,9 @@ def aggregate_document_keyphrases(
     1. Aggregate predictions by document
     2. Filter keyphrases containing disallowed punctuation (only dash is
        allowed; apostrophe is filtered)
-    3. Filter keyphrases with >= max_keyphrase_length words
-    4. Deduplicate (stem-based by default to match legacy, or lowercase)
-    5. Sort by confidence score (descending)
-    6. Cap at max_keyphrases per document (skip if None)
+    3. Deduplicate (stem-based by default to match legacy, or lowercase)
+    4. Sort by confidence score (descending)
+    5. Cap at max_keyphrases per document (skip if None)
 
     Args:
         ranked_predictions: List of keyphrase lists with confidence scores,
@@ -487,7 +485,6 @@ def aggregate_document_keyphrases(
         doc_rows: List of document row indices for each sentence.
         max_keyphrases: Maximum number of keyphrases to return per document.
             If None, no cap is applied.
-        max_keyphrase_length: Filter out keyphrases with >= this many words.
         filter_punctuation: If True, remove keyphrases containing disallowed
             punctuation characters.
         disallowed_punctuation: String of punctuation characters to filter.
@@ -523,14 +520,7 @@ def aggregate_document_keyphrases(
                 if kw.strip() and not any(p in kw for p in disallowed_punctuation)
             ]
 
-        # Step 3: Filter keyphrases that are too long (>= max_keyphrase_length words)
-        predictions = [
-            (kw, score)
-            for kw, score in predictions
-            if len(kw.split()) < max_keyphrase_length
-        ]
-
-        # Step 4: Deduplicate - stem-based (legacy) or lowercase
+        # Step 3: Deduplicate - stem-based (legacy) or lowercase
         seen: dict[str, tuple[str, float]] = {}
         for kw, score in predictions:
             if dedup_strategy == "stem":

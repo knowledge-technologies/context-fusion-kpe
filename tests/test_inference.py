@@ -498,19 +498,6 @@ def test_aggregate_document_keyphrases_repeated_words():
     assert "machine learning machine" not in keywords
 
 
-def test_aggregate_document_keyphrases_length_filter():
-    """Test that keywords with >= max_keyphrase_length words are filtered out."""
-    predictions = [[("a b c d e", 0.9), ("a b c d", 0.8), ("a b c", 0.7)]]
-    result = aggregate_document_keyphrases(
-        predictions, ["doc1"], [0], max_keyphrase_length=5
-    )
-    keywords = [kw for kw, _ in result[("doc1", 0)]]
-    # "a b c d e" has 5 words, which is >= max_keyphrase_length=5, so it's filtered
-    assert "a b c d e" not in keywords
-    assert "a b c d" in keywords
-    assert "a b c" in keywords
-
-
 def test_aggregate_document_keyphrases_dash_allowed_apostrophe_filtered():
     """Test that dash is allowed but apostrophe is filtered (per legacy TNT-KID code).
 
