@@ -97,6 +97,7 @@ def main() -> None:
 
     # Load configuration
     config = load_config(args.config)
+    model_config = load_config("configs/models.yaml")
 
     # Initialize models (expensive, do once)
     logger.info("Loading models...")
@@ -104,13 +105,14 @@ def main() -> None:
         model_name=config["segmentation"]["spacy_model"],
         exclude=config["segmentation"]["exclude"],
     )
-    tokenizer = AutoTokenizer.from_pretrained(config["tokenizer"]["model_name"])
+    tokenizer_cfg = model_config["tokenizer"]
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_cfg["model_name"])
     stemmer = PorterStemmer()
     device = config["processing"]["device"]
     match_mode = config.get("matching", {}).get("match_mode", "stem_equality")
 
     logger.info(f"spaCy model: {config['segmentation']['spacy_model']}")
-    logger.info(f"Tokenizer: {config['tokenizer']['model_name']}")
+    logger.info(f"Tokenizer: {tokenizer_cfg['model_name']}")
     logger.info(f"Device: {device}")
     logger.info(f"Match mode: {match_mode}")
 
