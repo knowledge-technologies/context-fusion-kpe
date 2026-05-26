@@ -182,6 +182,8 @@ def main() -> None:
             device=device,
             show_progress=True,
             match_mode=match_mode,
+            truncation=tokenizer_cfg.get("truncation", True),
+            padding=tokenizer_cfg.get("padding", True),
         )
 
         # Write to Parquet
