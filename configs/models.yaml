@@ -1,5 +1,5 @@
 keyphrase_model:
-  base_encoder_name: "answerdotai/ModernBERT-base"
+  base_encoder_name: &model_name "answerdotai/ModernBERT-base"
   freeze_base_encoder: false
   d_model: 768
   nhead: 4
@@ -9,3 +9,9 @@ keyphrase_model:
   max_position_embeddings: 768
   n_left_ctx: null   # Max preceding sentences for context (null = all available)
   n_right_ctx: null  # Max following sentences for context (null = all available)
+
+tokenizer:
+  model_name: *model_name
+  max_length: 512
+  truncation: true
+  padding: true

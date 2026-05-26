@@ -2,13 +2,7 @@
 #
 # This file controls how raw JSON datasets are processed into
 # training-ready Parquet files.
-
-# Tokenizer configuration
-tokenizer:
-  model_name: "sentence-transformers/all-mpnet-base-v2"
-  max_length: 512
-  truncation: true
-  padding: true
+# Tokenizer config is defined in configs/models.yaml
 
 # Sentence segmentation using spaCy
 segmentation:
