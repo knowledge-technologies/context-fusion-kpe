@@ -39,8 +39,14 @@ logger = get_logger("validate")
 
 
 def _normalize_keyphrases(keyphrases: list[list[str]]) -> list[list[str]]:
-    """Remove hyphens and lowercase."""
-    return [[kw.replace("-", " ").lower() for kw in doc_kws] for doc_kws in keyphrases]
+    """Apply legacy-style normalization: replace -, /, ∗ with spaces and lowercase."""
+    return [
+        [
+            kw.replace("-", " ").replace("/", " ").replace("∗", " ").lower()
+            for kw in doc_kws
+        ]
+        for doc_kws in keyphrases
+    ]
 
 
 def _compute_confusion_matrix(
@@ -207,7 +213,6 @@ def evaluate_model(
     global_step: int = 0,
     epoch: int = 0,
     sample_seed: int = 42,
-    max_keyphrase_length: int = 5,
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     iob_threshold: float = 0.5,
@@ -244,7 +249,6 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
-        max_keyphrase_length: Filter out keyphrases with >= this many words (default: 5).
         scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
         score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").
         iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
@@ -312,8 +316,16 @@ def evaluate_model(
     # Collect ranked predictions per sentence (with confidence scores)
     all_ranked_predictions: list[list[tuple[str, float]]] = []
 
-    # Track gold keywords per document (doc_id, doc_row) -> keywords
-    doc_to_gold: dict[tuple[str, int], list[str]] = {}
+    # Compute gold keywords per document from sent_keywords union.
+    # This matches legacy kw_in_paper: the union of all sentence-level
+    # keyword matches across the document.
+    gold_agg = val_df.group_by(["doc_id", "doc_row"]).agg(
+        pl.col("sent_keywords").flatten().unique().alias("keywords")
+    )
+    doc_to_gold: dict[tuple[str, int], list[str]] = {
+        (row["doc_id"], row["doc_row"]): row["keywords"]
+        for row in gold_agg.iter_rows(named=True)
+    }
 
     # Collect token-level predictions/targets for confusion matrix (IOB only)
     cm_preds: list[int] = []
@@ -331,7 +343,6 @@ def evaluate_model(
             sentence_counts = batch["sentence_counts"]
             doc_ids = batch["doc_ids"]
             doc_rows = batch["doc_rows"]
-            keywords = batch["keywords"]
 
             # Forward pass
             logits = model(input_ids, attention_mask, sentence_counts)
@@ -369,14 +380,6 @@ def evaluate_model(
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 
-            # Track gold keywords per document
-            doc_to_gold.update(
-                {
-                    (doc_id, doc_row): kw_list
-                    for doc_id, doc_row, kw_list in zip(doc_ids, doc_rows, keywords)
-                }
-            )
-
             # Free batch tensors to reduce memory fragmentation
             del input_ids, attention_mask, target, logits, loss, batch_ranked_keywords
             if device.type == "cuda":
@@ -394,7 +397,6 @@ def evaluate_model(
         doc_ids,
         doc_rows,
         max_keyphrases=None,
-        max_keyphrase_length=max_keyphrase_length,
         filter_punctuation=filter_punctuation,
         disallowed_punctuation=disallowed_punctuation,
         dedup_strategy=dedup_strategy,
