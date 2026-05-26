@@ -320,10 +320,10 @@ def evaluate_model(
     # This matches legacy kw_in_paper: the union of all sentence-level
     # keyword matches across the document.
     gold_agg = val_df.group_by(["doc_id", "doc_row"]).agg(
-        pl.col("sent_keywords").flatten().unique().alias("keywords")
+        pl.col("sent_keywords").flatten().unique().alias("keywords_in_doc")
     )
     doc_to_gold: dict[tuple[str, int], list[str]] = {
-        (row["doc_id"], row["doc_row"]): row["keywords"]
+        (row["doc_id"], row["doc_row"]): row["keywords_in_doc"]
         for row in gold_agg.iter_rows(named=True)
     }
 
