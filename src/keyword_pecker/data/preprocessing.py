@@ -385,12 +385,16 @@ def extract_word_level_data(
 def tokenize_sentences(
     sentences: list[str],
     tokenizer: AutoTokenizer,
+    truncation: bool = True,
+    padding: bool = True,
 ) -> dict[str, Any]:
     """Tokenize sentences with offset mapping.
 
     Args:
         sentences: List of sentence texts.
         tokenizer: HuggingFace tokenizer.
+        truncation: Whether to truncate sequences exceeding model_max_length.
+        padding: Whether to pad sequences to longest in batch.
 
     Returns:
         Tokenizer output dict with input_ids, attention_mask, offset_mapping.
@@ -399,8 +403,8 @@ def tokenize_sentences(
         sentences,
         return_tensors="pt",
         return_offsets_mapping=True,
-        truncation=True,
-        padding=True,
+        truncation=truncation,
+        padding=padding,
     )
 
 
@@ -588,6 +592,8 @@ def process_document(
     scheme: str = "IOB",
     device: str = "cpu",
     match_mode: Literal["stem_equality", "stem_regex"] = "stem_equality",
+    truncation: bool = True,
+    padding: bool = True,
 ) -> list[dict]:
     """Process a single document through the full pipeline.
 
@@ -609,6 +615,8 @@ def process_document(
               edge cases like keyword "ai" not matching "aims".
             - "stem_regex": exact word-boundary regex matching via
               build_keyword_regex / resolve_keyword_spans.
+        truncation: Whether to truncate sequences exceeding model_max_length.
+        padding: Whether to pad sequences to longest in batch.
 
     Returns:
         List of processed sentence dictionaries ready for Parquet output.
@@ -619,7 +627,9 @@ def process_document(
     normalized_keywords = [_normalize_text(kw).lower() for kw in keywords]
 
     # Tokenize all sentences at once (on original text for HF tokenizer)
-    tokenized = tokenize_sentences(sentences, tokenizer)
+    tokenized = tokenize_sentences(
+        sentences, tokenizer, truncation=truncation, padding=padding
+    )
 
     # Extract word_ids and word_lists using tokenizer word boundaries
     word_ids_per_sent, word_lists_per_sent = extract_word_level_data(
@@ -695,6 +705,8 @@ def process_dataset(
     device: str = "cpu",
     show_progress: bool = True,
     match_mode: Literal["stem_equality", "stem_regex"] = "stem_equality",
+    truncation: bool = True,
+    padding: bool = True,
 ) -> list[dict]:
     """Process a single JSON file through the full pipeline.
 
@@ -715,6 +727,8 @@ def process_dataset(
         show_progress: Whether to show progress bar.
         match_mode: Keyword matching strategy, passed through to process_document.
             See process_document for details.
+        truncation: Whether to truncate sequences exceeding model_max_length.
+        padding: Whether to pad sequences to longest in batch.
 
     Returns:
         List of processed sentence dictionaries.
@@ -794,6 +808,8 @@ def process_dataset(
             scheme=scheme,
             device=device,
             match_mode=match_mode,
+            truncation=truncation,
+            padding=padding,
         )
         all_processed.extend(doc_processed)
 
