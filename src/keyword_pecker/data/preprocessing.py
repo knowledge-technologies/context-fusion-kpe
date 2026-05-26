@@ -106,6 +106,25 @@ def segment_sentences(
 # ============================================================================
 
 
+def _normalize_text(text: str) -> str:
+    """Apply legacy-style text normalization before keyword matching.
+
+    Replaces hyphens, slashes, and asterisks with spaces so that
+    multi-word keywords like "deep-learning" match "deep learning" in text.
+    Matches the normalization in legacy preprocess_text().
+
+    Args:
+        text: Raw sentence text.
+
+    Returns:
+        Normalized text with -, /, ∗ replaced by spaces.
+    """
+    text = text.replace("-", " ")
+    text = text.replace("/", " ")
+    text = text.replace("∗", " ")
+    return text
+
+
 def build_keyword_regex(
     keywords: list[str],
     stemmer: PorterStemmer,
@@ -596,7 +615,10 @@ def process_document(
     """
     processed = []
 
-    # Tokenize all sentences at once
+    # Normalize keywords to match legacy behavior (lowercase + replace -, /, ∗ with spaces)
+    normalized_keywords = [_normalize_text(kw).lower() for kw in keywords]
+
+    # Tokenize all sentences at once (on original text for HF tokenizer)
     tokenized = tokenize_sentences(sentences, tokenizer)
 
     # Extract word_ids and word_lists using tokenizer word boundaries
@@ -608,24 +630,30 @@ def process_document(
 
     # Build regex pattern once (only needed for stem_regex mode)
     regex_pattern = (
-        build_keyword_regex(keywords, stemmer) if match_mode == "stem_regex" else None
+        build_keyword_regex(normalized_keywords, stemmer)
+        if match_mode == "stem_regex"
+        else None
     )
 
     for s_idx, sent in enumerate(sentences):
         sent_tok_len = tokenized.attention_mask[s_idx].sum().item()
 
+        # Normalize sentence text for keyword matching (positions preserved since
+        # -, /, ∗ are all single-char → single-space replacements)
+        sent_normalized = _normalize_text(sent).lower()
+
         # Resolve keywords in this sentence
         if match_mode == "stem_equality":
             sent_kwds, tok_ranges = resolve_keyword_spans_stem(
-                sent.lower(),
+                sent_normalized,
                 offset_mapping[s_idx].numpy(),
                 sent_tok_len,
-                keywords,
+                normalized_keywords,
                 stemmer,
             )
         else:
             sent_kwds, tok_ranges = resolve_keyword_spans(
-                sent.lower(),
+                sent_normalized,
                 offset_mapping[s_idx].numpy(),
                 sent_tok_len,
                 regex_pattern,
