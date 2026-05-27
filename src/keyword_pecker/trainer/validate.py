@@ -44,6 +44,7 @@ def _normalize_keyphrases(keyphrases: list[list[str]]) -> list[list[str]]:
         [
             kw.replace("-", " ").replace("/", " ").replace("∗", " ").lower()
             for kw in doc_kws
+            if kw is not None
         ]
         for doc_kws in keyphrases
     ]
