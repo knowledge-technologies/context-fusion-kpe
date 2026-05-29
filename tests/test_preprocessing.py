@@ -319,3 +319,183 @@ def test_resolve_keyword_spans_stem_multiword_inflected():
     assert len(kwds) == 1, (
         f"Expected 'knowledge hierarchies' to match keyword 'knowledge hierarchy', got: {kwds}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Subtoken-aware IOB labeling tests
+# ---------------------------------------------------------------------------
+
+
+def _make_offsets_with_subtokens(
+    words: list[str],
+    subtoken_splits: list[list[tuple[int, int]]],
+) -> tuple[np.ndarray, int]:
+    """Build offset array where words may be split into multiple subtokens.
+
+    Args:
+        words: List of word strings (the original sentence).
+        subtoken_splits: For each word, a list of (char_start, char_end) tuples
+            for each subtoken that the word is split into.
+
+    Returns:
+        offsets: np.ndarray of shape [num_subtokens + 2, 2] (includes BOS/EOS).
+        num_total_tokens: len(offsets).
+    """
+    spans = [[0, 0]]  # BOS sentinel
+    for word_subtokens in subtoken_splits:
+        for span in word_subtokens:
+            spans.append(list(span))
+    spans.append([0, 0])  # EOS sentinel
+    offsets = np.array(spans, dtype=np.int64)
+    return offsets, len(offsets)
+
+
+def test_iob_labels_with_subtoken_split_on_non_initial_keyword_word():
+    """IOB labels must propagate correctly when a keyword's non-initial word is split into subtokens.
+
+    Example: keyword "neural networks" matches "neural, networks" where
+    "networks" is tokenized as "net", "##works" (2 subtokens).
+
+    Expected IOB: [O, B, I, I, O, ...]
+      - "neural" → B (Beginning)
+      - "net"    → I (Inside, part of "networks")
+      - "##works"→ I (Inside, part of "networks")
+    """
+    stemmer = PorterStemmer()
+
+    # Sentence: "neural networks are powerful"
+    # Keyword: "neural networks" (2 words)
+    # Simulate tokenizer splitting "networks" into "net" + "##works"
+    sentence = "neural networks are powerful"
+    keywords = ["neural networks"]
+
+    # Build offsets simulating subtokenization:
+    # Token 0: BOS [0, 0]
+    # Token 1: "neural" [0, 6]
+    # Token 2: "net" [7, 10]   (first subtoken of "networks")
+    # Token 3: "##works" [10, 17]  (second subtoken of "networks")
+    # Token 4: "are" [18, 21]
+    # Token 5: "powerful" [22, 30]
+    # Token 6: EOS [0, 0]
+    offsets = np.array(
+        [
+            [0, 0],  # BOS
+            [0, 6],  # neural
+            [7, 10],  # net (subtoken 1 of "networks")
+            [10, 17],  # ##works (subtoken 2 of "networks")
+            [18, 21],  # are
+            [22, 30],  # powerful
+            [0, 0],  # EOS
+        ],
+        dtype=np.int64,
+    )
+    num_total_tokens = len(offsets)
+
+    kwds, ranges = resolve_keyword_spans_stem(
+        sentence, offsets, num_total_tokens, keywords, stemmer
+    )
+
+    # Keyword should be matched
+    assert len(kwds) == 1, f"Expected 1 match, got: {kwds}"
+
+    # Token range should cover tokens 1-4 (neural, net, ##works)
+    # i.e., range (1, 4) [start incl, end excl]
+    assert len(ranges) == 1
+    start_tok, end_tok = ranges[0]
+    assert start_tok == 1, f"Expected start_tok=1, got {start_tok}"
+    assert end_tok == 4, f"Expected end_tok=4, got {end_tok}"
+
+    # Now create IOB mask and verify labels
+    sent_tok_len = num_total_tokens  # 7 tokens including BOS/EOS
+    iob_mask = create_keyword_mask(ranges, sent_tok_len, scheme="IOB")
+
+    # Expected: [O, B, I, I, O, O, O]
+    # BOS=O, neural=B(1), net=I(2), ##works=I(2), are=O(0), powerful=O(0), EOS=O(0)
+    assert iob_mask[0].item() == 0, "BOS should be O"
+    assert iob_mask[1].item() == 1, "'neural' should be B (Beginning)"
+    assert iob_mask[2].item() == 2, "'net' should be I (Inside)"
+    assert iob_mask[3].item() == 2, "'##works' should be I (Inside)"
+    assert iob_mask[4].item() == 0, "'are' should be O (Outside)"
+    assert iob_mask[5].item() == 0, "'powerful' should be O (Outside)"
+    assert iob_mask[6].item() == 0, "EOS should be O"
+
+
+def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
+    """IOB labels must propagate correctly when a keyword's initial word is split into subtokens.
+
+    Example: keyword "bioinformatics research" where "bioinformatics" is
+    tokenized as "bio", "##in", "##for", "##matics" (4 subtokens).
+
+    Expected IOB: [B, B, B, B, I, O, ...]
+      - "bio"       → B (Beginning of first word)
+      - "##in"      → B (Beginning of first word, new subtoken)
+      - "##for"     → B (Beginning of first word, new subtoken)
+      - "##matics"  → B (Beginning of first word, new subtoken)
+      - "research"  → I (Inside, second word of keyword)
+
+    Note: The current implementation uses word-level stem matching, so it
+    operates on word boundaries, not subtoken boundaries. When a word is
+    split into subtokens, the token range covers ALL subtokens of matched
+    words, and create_keyword_mask assigns B to the first token and I to
+    all subsequent tokens in the range.
+    """
+    stemmer = PorterStemmer()
+
+    # Sentence: "bioinformatics research advances"
+    # Keyword: "bioinformatics research" (2 words)
+    # Simulate tokenizer splitting "bioinformatics" into 4 subtokens
+    sentence = "bioinformatics research advances"
+    keywords = ["bioinformatics research"]
+
+    # Build offsets simulating subtokenization:
+    # Token 0: BOS [0, 0]
+    # Token 1: "bio" [0, 3]
+    # Token 2: "##in" [3, 6]
+    # Token 3: "##for" [6, 10]
+    # Token 4: "##matics" [10, 18]
+    # Token 5: "research" [19, 27]
+    # Token 6: "advances" [28, 36]
+    # Token 7: EOS [0, 0]
+    offsets = np.array(
+        [
+            [0, 0],  # BOS
+            [0, 3],  # bio (subtoken 1 of "bioinformatics")
+            [3, 6],  # ##in (subtoken 2)
+            [6, 10],  # ##for (subtoken 3)
+            [10, 18],  # ##matics (subtoken 4)
+            [19, 27],  # research
+            [28, 36],  # advances
+            [0, 0],  # EOS
+        ],
+        dtype=np.int64,
+    )
+    num_total_tokens = len(offsets)
+
+    kwds, ranges = resolve_keyword_spans_stem(
+        sentence, offsets, num_total_tokens, keywords, stemmer
+    )
+
+    # Keyword should be matched
+    assert len(kwds) == 1, f"Expected 1 match, got: {kwds}"
+
+    # Token range should cover tokens 1-6 (bio, ##in, ##for, ##matics, research)
+    # i.e., range (1, 6) [start incl, end excl]
+    assert len(ranges) == 1
+    start_tok, end_tok = ranges[0]
+    assert start_tok == 1, f"Expected start_tok=1, got {start_tok}"
+    assert end_tok == 6, f"Expected end_tok=6, got {end_tok}"
+
+    # Create IOB mask and verify labels
+    sent_tok_len = num_total_tokens
+    iob_mask = create_keyword_mask(ranges, sent_tok_len, scheme="IOB")
+
+    # Expected: [O, B, I, I, I, I, O, O]
+    # BOS=O, bio=B, ##in=I, ##for=I, ##matics=I, research=I, advances=O, EOS=O
+    assert iob_mask[0].item() == 0, "BOS should be O"
+    assert iob_mask[1].item() == 1, "'bio' should be B (Beginning)"
+    assert iob_mask[2].item() == 2, "'##in' should be I (Inside)"
+    assert iob_mask[3].item() == 2, "'##for' should be I (Inside)"
+    assert iob_mask[4].item() == 2, "'##matics' should be I (Inside)"
+    assert iob_mask[5].item() == 2, "'research' should be I (Inside)"
+    assert iob_mask[6].item() == 0, "'advances' should be O (Outside)"
+    assert iob_mask[7].item() == 0, "EOS should be O"
