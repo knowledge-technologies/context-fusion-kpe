@@ -1,5 +1,5 @@
 keyphrase_model:
-  base_encoder_name: &model_name "answerdotai/ModernBERT-base"
+  base_encoder_name: &model_name "microsoft/deberta-v3-base"
   freeze_base_encoder: false
   d_model: 768
   nhead: 4
