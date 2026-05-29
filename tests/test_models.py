@@ -425,6 +425,7 @@ def test_construct_context_unequal_lengths():
     assert ctx.input_seq.shape[1] == 8
 
     # --- Verify padding mask ---
+    # Valid positions are 0's, Padd positions are 1's
     # Valid length per sentence = pre + 1(pre_marker) + sent_len + 1(post_marker) + post
     # sent0: 0 + 1 + 2 + 1 + 2 = 6 valid -> positions 6,7 are padding
     # sent1: 1 + 1 + 4 + 1 + 1 = 8 valid -> no padding
