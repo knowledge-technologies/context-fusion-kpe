@@ -20,6 +20,7 @@ class ContextResult(NamedTuple):
     word_embs_end: torch.Tensor  # (num_sentences,) - end indices (exclusive)
     pre_context_len: torch.Tensor  # (num_sentences,) - actual pre-context length used
     post_context_len: torch.Tensor  # (num_sentences,) - actual post-context length used
+    padding_mask: torch.Tensor  # (num_sentences, max_size) - True = padding (ignore)
 
 
 class RefinementEncoder(nn.Module):
@@ -161,18 +162,15 @@ class RefinementEncoder(nn.Module):
             device=device,
         )
 
-        # Max input sequence size based on configured context limits
-        max_left = (
-            self.n_left_ctx
-            if self.n_left_ctx is not None
-            else (max(sentence_counts) - 1)
-        )
-        max_right = (
-            self.n_right_ctx
-            if self.n_right_ctx is not None
-            else (max(sentence_counts) - 1)
-        )
-        max_context = max_left + max_right
+        # Max context per sentence: pre + post combined
+        # When both sides are capped, max is min(caps_sum, N-1)
+        # When either side is uncapped, max is N-1 (total context is always N-1)
+        if self.n_left_ctx is not None and self.n_right_ctx is not None:
+            max_context = min(
+                self.n_left_ctx + self.n_right_ctx, max(sentence_counts) - 1
+            )
+        else:
+            max_context = max(sentence_counts) - 1
         max_size = max_context + int(sent_len.max().item()) + 2  # +2 for markers
 
         # Allocate input buffer
@@ -237,12 +235,19 @@ class RefinementEncoder(nn.Module):
                     global_idx + 1 : global_idx + 1 + post_len
                 ]
 
+        # Build padding mask: True = padding position (should be ignored)
+        # Valid length per sentence = pre + 1(marker) + words + 1(marker) + post
+        valid_len = pre_context_len + post_context_len + sent_len.long() + 2
+        positions = torch.arange(max_size, device=device).unsqueeze(0)  # (1, max_size)
+        padding_mask = positions >= valid_len.unsqueeze(1)  # (num_sentences, max_size)
+
         return ContextResult(
             input_seq=input_seq,
             word_embs_start=word_embs_start,
             word_embs_end=word_embs_end,
             pre_context_len=pre_context_len,
             post_context_len=post_context_len,
+            padding_mask=padding_mask,
         )
 
     def forward(
@@ -284,8 +289,10 @@ class RefinementEncoder(nn.Module):
         positions = torch.arange(max_size, device=device)
         input_seq = ctx.input_seq + self.position_embeddings(positions).unsqueeze(0)
 
-        # 3. Pass through transformer encoder
-        output = self.transformer_encoder(input_seq)
+        # 3. Pass through transformer encoder with padding mask
+        output = self.transformer_encoder(
+            input_seq, src_key_padding_mask=ctx.padding_mask
+        )
 
         # 4. Project to logits and extract word positions
         output = self.projection(output)
