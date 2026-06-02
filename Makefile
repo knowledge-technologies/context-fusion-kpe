@@ -37,14 +37,14 @@ endif
 # CONTAINER TARGETS
 # ============================================================================
 
-# Build the Singularity image from container.def
+# Build the Apptainer image from container.def
 out/container.sif: container.def pyproject.toml uv.lock
 > mkdir -p out
-> singularity build --force --fakeroot out/container.sif container.def
+> apptainer build --force --fakeroot out/container.sif container.def
 
 # Launch an interactive shell inside the container with GPU access
 shell:
-> singularity shell --nv --env-file .env \
+> apptainer shell --nv --env-file .env \
 >     --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >     --bind ${PWD}:/workspace out/container.sif
 .PHONY: shell
@@ -60,7 +60,7 @@ ifeq ($(SERVER),kt-gpu4)
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s remote-train \
->     'singularity exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
+>     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
 >         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
@@ -78,7 +78,7 @@ attach-train:
 remote-evaluate:
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s remote-evaluate \
->     'singularity exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
+>     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
 >         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
@@ -100,7 +100,7 @@ ifndef RUN_ID
 endif
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s remote-eval-all \
->     'singularity exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
+>     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
 >         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
@@ -174,7 +174,7 @@ copy-run-model:
 >     ~/data/keyword-pecker-data/runs/${RUN_NAME}/
 .PHONY: copy-run-model
 
-# Run prepare_data.py on the remote server inside the Singularity container (CPU-only, no --nv).
+# Run prepare_data.py on the remote server inside the Apptainer container (CPU-only, no --nv).
 # KT-GPU2: tmux session. KT-GPU4: SLURM job.
 # Usage: make remote-preprocess-data [SERVER=kt-gpu4] [DATASET=kp20k] [OPT_ARGS="--arg1 --arg2"]
 DATASET ?= kp20k
@@ -187,7 +187,7 @@ ifeq ($(SERVER),kt-gpu4)
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s preprocess-${DATASET} \
->     'singularity exec --env-file ${REMOTE_PROJECT_DIR}/.env \
+>     'apptainer exec --env-file ${REMOTE_PROJECT_DIR}/.env \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
@@ -209,14 +209,14 @@ clean:
 # REMOTE CONTAINER BUILD
 # ============================================================================
 
-# Build the Singularity container on the remote server.
+# Build the Apptainer container on the remote server.
 # Usage: make remote-build-container [SERVER=kt-gpu4]
 remote-build-container:
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "cd ${REMOTE_PROJECT_DIR} && \
 >      mkdir -p out && \
->      singularity build --force --fakeroot out/container.sif container.def"
+>      apptainer build --force --fakeroot out/container.sif container.def"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "cd ${REMOTE_PROJECT_DIR} && make out/container.sif"
