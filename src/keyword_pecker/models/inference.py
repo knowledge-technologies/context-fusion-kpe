@@ -108,20 +108,17 @@ def _decode_binary_keyphrases(
 def _aggregate_tokens_to_words(
     token_probs: torch.Tensor,
     word_ids: torch.Tensor,
+    subtok2word_prob: str = "first_subtoken",
 ) -> tuple[list[int], list[float]]:
-    """Aggregate token-level predictions to word-level by grouping subwords.
-
-    For each word (grouped by word_id), the word-level prediction is derived
-    by averaging softmax probabilities across all subword tokens, then taking
-    argmax. The confidence score is the averaged P(predicted_class).
-
-    This approach is more robust than using only the first subword's label,
-    as it prevents a weak or noisy prefix from overriding a confident root.
+    """Aggregate token-level predictions to word-level.
 
     Args:
         token_probs: (seq_len, num_classes) tensor of softmax probabilities.
         word_ids: (seq_len,) tensor mapping tokens to word indices
             (-1 for special/padding).
+        subtok2word_prob: Aggregation strategy.
+            - "first_subtoken": Use only the first subtoken's prediction (legacy match).
+            - "average": Average softmax probabilities across all subtokens.
 
     Returns:
         Tuple of (word_preds, word_probs) as plain Python lists.
@@ -141,13 +138,22 @@ def _aggregate_tokens_to_words(
 
     for wid in sorted(word_token_indices.keys()):
         indices = word_token_indices[wid]
-        avg_probs = [
-            sum(token_probs[idx, c].item() for idx in indices) / len(indices)
-            for c in range(num_classes)
-        ]
-        pred = int(max(range(num_classes), key=lambda c: avg_probs[c]))
-        word_preds.append(pred)
-        word_probs.append(avg_probs[pred])
+
+        if subtok2word_prob == "average":
+            avg_probs = [
+                sum(token_probs[idx, c].item() for idx in indices) / len(indices)
+                for c in range(num_classes)
+            ]
+            pred = int(max(range(num_classes), key=lambda c: avg_probs[c]))
+            word_preds.append(pred)
+            word_probs.append(avg_probs[pred])
+        else:
+            first_idx = indices[0]
+            probs = token_probs[first_idx]
+            pred = int(probs.argmax().item())
+            conf = probs[pred].item()
+            word_preds.append(pred)
+            word_probs.append(conf)
 
     return word_preds, word_probs
 
@@ -241,6 +247,7 @@ def _decode_iob_keyphrases(
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
     iob_threshold: float = 0.5,
+    subtok2word_prob: str = "first_subtoken",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases from IOB predictions using argmax + B/I/O decoding.
 
@@ -278,9 +285,12 @@ def _decode_iob_keyphrases(
             token_probs = probs[i, :seq_len]
             sentence_word_ids = word_ids[i, :seq_len]
 
+            # first assemble subtoken probs to word-level
             word_preds, word_probs = _aggregate_tokens_to_words(
-                token_probs, sentence_word_ids
+                token_probs, sentence_word_ids, subtok2word_prob=subtok2word_prob
             )
+
+            # now assemble keywords into keyphrases
             sentence_keyphrases = _extract_iob_keywords_word_level(
                 word_preds,
                 word_probs,
@@ -377,6 +387,7 @@ def extract_ranked_keyphrases(
     word_ids: torch.Tensor | None = None,
     word_lists: list[list[str]] | None = None,
     iob_threshold: float = 0.5,
+    subtok2word_prob: str = "first_subtoken",
 ) -> list[list[tuple[str, float]]]:
     """Extract keyphrases ranked by model confidence.
 
@@ -429,6 +440,7 @@ def extract_ranked_keyphrases(
             word_ids=word_ids,
             word_lists=word_lists,
             iob_threshold=iob_threshold,
+            subtok2word_prob=subtok2word_prob,
         )
 
 
@@ -466,6 +478,7 @@ def aggregate_document_keyphrases(
     filter_punctuation: bool = True,
     disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
+    scoring_strategy: str = "confidence",
 ) -> dict[tuple[str, int], list[tuple[str, float]]]:
     """Aggregate sentence-level keyphrase predictions to document level.
 
@@ -539,9 +552,13 @@ def aggregate_document_keyphrases(
             if kw_key not in seen or score > seen[kw_key][1]:
                 seen[kw_key] = (kw, score)
 
-        # Step 5: Sort by score descending
+        # Step 5: Sort by score descending or use unordered (legacy set() behavior)
         deduped = list(seen.values())
-        deduped.sort(key=lambda x: x[1], reverse=True)
+        if scoring_strategy == "unordered":
+            unique_kws = list(set(kw for kw, _ in deduped))
+            deduped = [(kw, 0.0) for kw in unique_kws]
+        else:
+            deduped.sort(key=lambda x: x[1], reverse=True)
 
         # Step 6: Cap at max_keyphrases (skip if None)
         if max_keyphrases is not None:
@@ -572,6 +589,7 @@ def predict_keyphrases(
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     iob_threshold: float = 0.5,
+    subtok2word_prob: str = "first_subtoken",
     return_scores: bool = False,
 ) -> list[str] | list[KeyphraseResult]:
     """Extract keyphrases from text using a trained KeyphraseModel.
@@ -666,6 +684,7 @@ def predict_keyphrases(
         word_ids=padded_word_ids.to(device),
         word_lists=word_lists,
         iob_threshold=iob_threshold,
+        subtok2word_prob=subtok2word_prob,
     )
 
     # Aggregate to document level with filtering, deduplication, and capping
@@ -678,11 +697,12 @@ def predict_keyphrases(
         doc_ids,
         doc_rows,
         max_keyphrases=max_kp,
+        scoring_strategy=scoring_strategy,
     )
 
-    sorted_keyphrases = doc_results.get(("doc_0", 0), [])
+    final_keyphrases = doc_results.get(("doc_0", 0), [])
 
     if return_scores:
-        return [KeyphraseResult(kw, score) for kw, score in sorted_keyphrases]
+        return [KeyphraseResult(kw, score) for kw, score in final_keyphrases]
     else:
-        return [kw for kw, _ in sorted_keyphrases]
+        return [kw for kw, _ in final_keyphrases]
