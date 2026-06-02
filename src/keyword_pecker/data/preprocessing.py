@@ -413,8 +413,13 @@ def create_keyword_mask(
     sent_tok_len: int,
     scheme: str = "IOB",
     device: str = "cpu",
+    word_ids: list[int] | None = None,
 ) -> torch.Tensor:
     """Create keyword mask for tokens using binary or IOB labeling scheme.
+
+    When ``word_ids`` is provided, only the first subtoken of each word receives
+    a label; continuation subtokens are set to ``-100`` (PyTorch ignore index).
+    This matches the legacy ``tokenize_and_align_labels`` behavior.
 
     Args:
         keyword_token_ranges: List of [start, end) token index pairs (`end` is not included).
@@ -422,19 +427,33 @@ def create_keyword_mask(
         scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
             "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device for computation.
+        word_ids: Optional list mapping each token to its word index (-1 for
+            special/padding tokens). When provided, non-initial subtokens get -100.
 
     Returns:
         Tensor of shape (sent_tok_len,) with labels:
-        - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside)
-        - Binary scheme: 0 (not keyword), 1 (keyword)
+        - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside), -100 (ignored subtoken)
+        - Binary scheme: 0 (not keyword), 1 (keyword), -100 (ignored subtoken)
 
     Raises:
         ValueError: If overlapping keywords detected (should not happen
             with the skip strategy in resolve_keyword_spans).
     """
+
+    # if no keyphrases in sentece
     if not keyword_token_ranges:
+        # if we have word ids, sort those to be ignored
+        if word_ids is not None:
+            targets = torch.full((sent_tok_len,), -100, dtype=torch.long)
+            for t in range(sent_tok_len):
+                if word_ids[t] == -1:
+                    targets[t] = -100
+                elif t == 0 or word_ids[t] != word_ids[t - 1]:
+                    targets[t] = 0
+            return targets
         return torch.zeros(sent_tok_len, dtype=torch.long)
 
+    # if we have keyphrases, use token ranges
     tok_start, tok_end = zip(*keyword_token_ranges)
     tok_start = torch.tensor(tok_start)
     tok_end = torch.tensor(tok_end)
@@ -472,6 +491,7 @@ def create_keyword_mask(
 
     factory = _iob_labels if scheme == "IOB" else _binary_labels
 
+    # place IOB labels (0, 1, 2)
     targets = factory(idxs=arange, starts=tok_start, ends=tok_end)
 
     if scheme == "binary":
@@ -484,6 +504,18 @@ def create_keyword_mask(
             raise ValueError(
                 f"Overlapping keywords detected: max overlap = {targets.max()}"
             )
+
+    if word_ids is not None:
+        prev_wid = None
+        for t in range(sent_tok_len):
+            wid = word_ids[t]
+            if wid == -1:
+                targets[t] = -100
+            elif wid != prev_wid:
+                pass  # first subtoken of word → keep label
+            else:
+                targets[t] = -100  # continuation subtoken → ignore
+            prev_wid = wid
 
     return targets
 
@@ -670,7 +702,13 @@ def process_document(
             )
 
         # Create keyword mask
-        keyword_mask = create_keyword_mask(tok_ranges, sent_tok_len, scheme, device)
+        keyword_mask = create_keyword_mask(
+            tok_ranges,
+            sent_tok_len,
+            scheme,
+            device,
+            word_ids=word_ids_per_sent[s_idx][:sent_tok_len],
+        )
 
         processed.append(
             {
