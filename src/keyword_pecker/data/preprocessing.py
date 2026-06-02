@@ -27,6 +27,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import BatchEncoding
 
+from keyword_pecker.constants import IGNORE_IDX
 from keyword_pecker.utils import get_logger
 
 logger = get_logger("preprocessing")
@@ -418,7 +419,7 @@ def create_keyword_mask(
     """Create keyword mask for tokens using binary or IOB labeling scheme.
 
     When ``word_ids`` is provided, only the first subtoken of each word receives
-    a label; continuation subtokens are set to ``-100`` (PyTorch ignore index).
+    a label; continuation subtokens are set to ``IGNORE_IDX`` (PyTorch ignore index).
     This matches the legacy ``tokenize_and_align_labels`` behavior.
 
     Args:
@@ -428,12 +429,12 @@ def create_keyword_mask(
             "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device for computation.
         word_ids: Optional list mapping each token to its word index (-1 for
-            special/padding tokens). When provided, non-initial subtokens get -100.
+            special/padding tokens). When provided, non-initial subtokens get IGNORE_IDX.
 
     Returns:
         Tensor of shape (sent_tok_len,) with labels:
-        - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside), -100 (ignored subtoken)
-        - Binary scheme: 0 (not keyword), 1 (keyword), -100 (ignored subtoken)
+        - IOB scheme: 0 (Outside), 1 (Beginning), 2 (Inside), IGNORE_IDX (ignored subtoken)
+        - Binary scheme: 0 (not keyword), 1 (keyword), IGNORE_IDX (ignored subtoken)
 
     Raises:
         ValueError: If overlapping keywords detected (should not happen
@@ -444,10 +445,10 @@ def create_keyword_mask(
     if not keyword_token_ranges:
         # if we have word ids, sort those to be ignored
         if word_ids is not None:
-            targets = torch.full((sent_tok_len,), -100, dtype=torch.long)
+            targets = torch.full((sent_tok_len,), IGNORE_IDX, dtype=torch.long)
             for t in range(sent_tok_len):
                 if word_ids[t] == -1:
-                    targets[t] = -100
+                    targets[t] = IGNORE_IDX
                 elif t == 0 or word_ids[t] != word_ids[t - 1]:
                     targets[t] = 0
             return targets
@@ -510,11 +511,11 @@ def create_keyword_mask(
         for t in range(sent_tok_len):
             wid = word_ids[t]
             if wid == -1:
-                targets[t] = -100
+                targets[t] = IGNORE_IDX
             elif wid != prev_wid:
                 pass  # first subtoken of word → keep label
             else:
-                targets[t] = -100  # continuation subtoken → ignore
+                targets[t] = IGNORE_IDX  # continuation subtoken → ignore
             prev_wid = wid
 
     return targets

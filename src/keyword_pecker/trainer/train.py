@@ -17,7 +17,7 @@ import torch
 import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
 from keyword_pecker.data import compute_class_weights, create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer.early_stopping import EarlyStopping
@@ -181,12 +181,14 @@ def train(
             loss_fn = torch.nn.CrossEntropyLoss(
                 weight=class_weights_tensor,
                 reduction="none",
+                ignore_index=IGNORE_IDX,
             )
             logger.info(f"Using CrossEntropyLoss with class_weights={class_weights}")
         else:
             loss_fn = torch.nn.CrossEntropyLoss(
                 weight=None,
                 reduction="none",
+                ignore_index=IGNORE_IDX,
             )
             logger.info("Using CrossEntropyLoss with equal class weights (weight=None)")
 
@@ -271,9 +273,11 @@ def train(
                 if num_classes == 2:
                     loss = loss_fn(logits, target) * attention_mask
                 else:
-                    loss = loss_fn(logits.transpose(1, 2), target) * attention_mask
-                loss = loss.sum() / attention_mask.sum()
-                loss.backward()
+                    ignore_mask = target != IGNORE_IDX
+                    full_mask = attention_mask & ignore_mask
+                    loss = loss_fn(logits.transpose(1, 2), target) * full_mask
+                    loss = loss.sum() / full_mask.sum().clamp(min=1)
+                    loss.backward()
 
                 last_loss = loss.detach().cpu().item()
 
