@@ -583,6 +583,7 @@ def test_aggregate_tokens_to_words_basic():
         ]
     )
 
+    # Test "average" strategy
     word_preds, word_probs = _aggregate_tokens_to_words(
         token_probs, word_ids, subtok2word_prob="average"
     )
@@ -593,6 +594,18 @@ def test_aggregate_tokens_to_words_basic():
     assert abs(word_probs[0] - 0.475) < 1e-6
     # Word 1: avg P(O)=0.075, P(B)=0.075, P(I)=0.85 → pred=I(2), conf=0.85
     assert abs(word_probs[1] - 0.85) < 1e-6
+
+    # Test "first_subtoken" strategy
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_probs, word_ids, subtok2word_prob="first_subtoken"
+    )
+
+    assert word_preds == [1, 2]
+    assert len(word_probs) == 2
+    # Word 0: first subtoken (idx 1) → P(B)=0.85 → pred=B(1), conf=0.85
+    assert abs(word_probs[0] - 0.85) < 1e-6
+    # Word 1: first subtoken (idx 3) → P(I)=0.9 → pred=I(2), conf=0.9
+    assert abs(word_probs[1] - 0.9) < 1e-6
 
 
 def test_aggregate_tokens_to_words_skips_special_tokens():
