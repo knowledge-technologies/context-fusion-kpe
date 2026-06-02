@@ -256,8 +256,8 @@ def train(
             outer_step = 0
             inner_count = 0
             last_loss: float | None = None
-            epoch_loss_sum = 0.0
-            epoch_loss_count = 0
+            epoch_raw_loss_sum = 0.0
+            epoch_token_count = 0
 
             total_outer = math.ceil(len(train_loader) / inner_per_outer)
             progress = tqdm.trange(total_outer, desc="steps")
@@ -276,10 +276,16 @@ def train(
                     ignore_mask = target != IGNORE_IDX
                     full_mask = attention_mask & ignore_mask
                     loss = loss_fn(logits.transpose(1, 2), target) * full_mask
+                    raw_loss_sum = loss.sum().item()
+                    raw_token_count = full_mask.sum().item()
                     loss = loss.sum() / full_mask.sum().clamp(min=1)
                     loss.backward()
 
                 last_loss = loss.detach().cpu().item()
+
+                if num_classes != 2:
+                    epoch_raw_loss_sum += raw_loss_sum
+                    epoch_token_count += raw_token_count
 
                 del logits, loss, input_ids, attention_mask, target
                 if device.type == "cuda":
@@ -297,9 +303,6 @@ def train(
                     optimizer.zero_grad()
 
                     if last_loss is not None:
-                        epoch_loss_sum += last_loss
-                        epoch_loss_count += 1
-
                         if outer_step % log_every == 0:
                             logger.info(f"step {global_step} loss: {last_loss:.6f}")
 
@@ -410,9 +413,6 @@ def train(
                 optimizer.zero_grad()
 
                 if last_loss is not None:
-                    epoch_loss_sum += last_loss
-                    epoch_loss_count += 1
-
                     if outer_step % log_every == 0:
                         logger.info(f"step {global_step} loss: {last_loss:.6f}")
 
@@ -440,8 +440,8 @@ def train(
 
             progress.close()
 
-            if epoch_loss_count > 0:
-                mean_loss = epoch_loss_sum / epoch_loss_count
+            if epoch_token_count > 0:
+                mean_loss = epoch_raw_loss_sum / epoch_token_count
                 logger.info(f"Epoch {epoch + 1} mean loss: {mean_loss:.6f}")
 
                 metrics_file.write(
