@@ -113,65 +113,77 @@ def test_create_keyword_mask():
 
     SENT_LEN = 10
     KEYWORD_RANGES = [(2, 5), (6, 8)]
+    word_ids = [-1] + list(range(SENT_LEN - 2)) + [-1]
 
     kw_mask = create_keyword_mask(
         keyword_token_ranges=KEYWORD_RANGES,
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="binary",
     )
 
     assert len(kw_mask) == SENT_LEN
-    assert sum(kw_mask) == 5
+    assert kw_mask[0].item() == IGNORE_IDX
+    assert kw_mask[-1].item() == IGNORE_IDX
+    assert sum(1 for v in kw_mask if v == 1) == 5
 
     kw_mask = create_keyword_mask(
         keyword_token_ranges=KEYWORD_RANGES,
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="IOB",
     )
 
     assert len(kw_mask) == SENT_LEN
-    assert sum(kw_mask) == 8
+    assert kw_mask[0].item() == IGNORE_IDX
+    assert kw_mask[-1].item() == IGNORE_IDX
+    assert sum(1 for v in kw_mask if v in (1, 2)) == 5
 
 
 def test_create_keyword_mask_iob_detailed():
     """Test IOB labeling scheme with detailed assertions."""
 
     SENT_LEN = 10
+    word_ids = [-1] + list(range(SENT_LEN - 2)) + [-1]
 
     kw_mask_single = create_keyword_mask(
         keyword_token_ranges=[(2, 3)],
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="IOB",
     )
     assert kw_mask_single[2].item() == 1
-    assert sum(kw_mask_single).item() == 1
+    assert sum(1 for v in kw_mask_single if v in (1, 2)) == 1
 
     kw_mask_multi = create_keyword_mask(
         keyword_token_ranges=[(2, 5)],
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="IOB",
     )
     assert kw_mask_multi[2].item() == 1
     assert kw_mask_multi[3].item() == 2
     assert kw_mask_multi[4].item() == 2
-    assert sum(kw_mask_multi).item() == 5
+    assert sum(1 for v in kw_mask_multi if v in (1, 2)) == 3
 
     kw_mask_adjacent = create_keyword_mask(
         keyword_token_ranges=[(2, 3), (3, 5)],
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="IOB",
     )
     assert kw_mask_adjacent[2].item() == 1
     assert kw_mask_adjacent[3].item() == 1
     assert kw_mask_adjacent[4].item() == 2
-    assert sum(kw_mask_adjacent).item() == 4
+    assert sum(1 for v in kw_mask_adjacent if v in (1, 2)) == 3
 
     kw_mask_none = create_keyword_mask(
         keyword_token_ranges=[],
         sent_tok_len=SENT_LEN,
+        word_ids=word_ids,
         scheme="IOB",
     )
-    assert all(kw_mask_none == 0)
+    assert all(v == 0 or v == IGNORE_IDX for v in kw_mask_none)
 
 
 # ---------------------------------------------------------------------------
@@ -352,15 +364,19 @@ def _make_offsets_with_subtokens(
 
 
 def test_iob_labels_with_subtoken_split_on_non_initial_keyword_word():
-    """IOB labels must propagate correctly when a keyword's non-initial word is split into subtokens.
+    """IOB labels must use IGNORE_IDX for continuation subtokens.
 
     Example: keyword "neural networks" matches "neural, networks" where
     "networks" is tokenized as "net", "##works" (2 subtokens).
 
-    Expected IOB: [O, B, I, I, O, ...]
-      - "neural" → B (Beginning)
-      - "net"    → I (Inside, part of "networks")
-      - "##works"→ I (Inside, part of "networks")
+    Expected: [-100, B, I, -100, O, O, -100]
+      - BOS           → -100 (special token)
+      - "neural"      → B (Beginning, word 0)
+      - "net"         → I (Inside, word 1)
+      - "##works"     → -100 (continuation subtoken of word 1)
+      - "are"         → O (Outside, word 2)
+      - "powerful"    → O (Outside, word 3)
+      - EOS           → -100 (special token)
     """
     stemmer = PorterStemmer()
 
@@ -406,52 +422,30 @@ def test_iob_labels_with_subtoken_split_on_non_initial_keyword_word():
     assert start_tok == 1, f"Expected start_tok=1, got {start_tok}"
     assert end_tok == 4, f"Expected end_tok=4, got {end_tok}"
 
-    # Now create IOB mask and verify labels (WITHOUT word_ids)
+    # Create IOB mask with word_ids: continuation subtokens get IGNORE_IDX
     sent_tok_len = num_total_tokens  # 7 tokens including BOS/EOS
-    iob_mask = create_keyword_mask(ranges, sent_tok_len, scheme="IOB")
-
-    # Expected: [O, B, I, I, O, O, O]
-    # BOS=O, neural=B(1), net=I(2), ##works=I(2), are=O(0), powerful=O(0), EOS=O(0)
-    assert iob_mask[0].item() == 0, "BOS should be O"
-    assert iob_mask[1].item() == 1, "'neural' should be B (Beginning)"
-    assert iob_mask[2].item() == 2, "'net' should be I (Inside)"
-    assert iob_mask[3].item() == 2, "'##works' should be I (Inside)"
-    assert iob_mask[4].item() == 0, "'are' should be O (Outside)"
-    assert iob_mask[5].item() == 0, "'powerful' should be O (Outside)"
-    assert iob_mask[6].item() == 0, "EOS should be O"
-
-    # --- WITH word_ids: continuation subtokens get IGNORE_IDX ---
     word_ids = [-1, 0, 1, 1, 2, 3, -1]
-    iob_mask_with_word_ids = create_keyword_mask(
-        ranges, sent_tok_len, scheme="IOB", word_ids=word_ids
+    iob_mask = create_keyword_mask(
+        ranges, sent_tok_len, word_ids=word_ids, scheme="IOB"
     )
 
     # Expected: [-100, B, I, -100, O, O, -100]
-    # BOS=-100 (special), neural=B(1), net=I(2), ##works=-100 (continuation), are=O(0), powerful=O(0), EOS=-100
-    assert iob_mask_with_word_ids[0].item() == IGNORE_IDX, (
-        "BOS should be IGNORE_IDX (special token)"
-    )
-    assert iob_mask_with_word_ids[1].item() == 1, "'neural' should be B (Beginning)"
-    assert iob_mask_with_word_ids[2].item() == 2, "'net' should be I (Inside)"
-    assert iob_mask_with_word_ids[3].item() == IGNORE_IDX, (
+    assert iob_mask[0].item() == IGNORE_IDX, "BOS should be IGNORE_IDX (special token)"
+    assert iob_mask[1].item() == 1, "'neural' should be B (Beginning)"
+    assert iob_mask[2].item() == 2, "'net' should be I (Inside)"
+    assert iob_mask[3].item() == IGNORE_IDX, (
         "'##works' should be IGNORE_IDX (continuation subtoken)"
     )
-    assert iob_mask_with_word_ids[4].item() == 0, "'are' should be O (Outside)"
-    assert iob_mask_with_word_ids[5].item() == 0, "'powerful' should be O (Outside)"
-    assert iob_mask_with_word_ids[6].item() == IGNORE_IDX, (
-        "EOS should be IGNORE_IDX (special token)"
-    )
+    assert iob_mask[4].item() == 0, "'are' should be O (Outside)"
+    assert iob_mask[5].item() == 0, "'powerful' should be O (Outside)"
+    assert iob_mask[6].item() == IGNORE_IDX, "EOS should be IGNORE_IDX (special token)"
 
 
 def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
-    """IOB labels must use -100 for continuation subtokens (legacy behavior).
+    """IOB labels must use IGNORE_IDX for continuation subtokens.
 
     Example: keyword "bioinformatics research" where "bioinformatics" is
     tokenized as "bio", "##in", "##for", "##matics" (4 subtokens).
-
-    When word_ids is provided to create_keyword_mask, only the first subtoken
-    of each word receives a label; continuation subtokens get -100 (PyTorch
-    ignore index). This matches the legacy tokenize_and_align_labels behavior.
 
     Expected: [-100, B, -100, -100, -100, I, O, -100]
       - BOS           → -100 (special token)
@@ -511,41 +505,18 @@ def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
     assert start_tok == 1, f"Expected start_tok=1, got {start_tok}"
     assert end_tok == 6, f"Expected end_tok=6, got {end_tok}"
 
-    # Create IOB mask WITHOUT word_ids and verify labels
+    # Create IOB mask with word_ids: continuation subtokens get IGNORE_IDX
     sent_tok_len = num_total_tokens
-    iob_mask = create_keyword_mask(ranges, sent_tok_len, scheme="IOB")
-
-    # Expected WITHOUT word_ids: [O, B, I, I, I, I, O, O]
-    # All subtokens within keyword range get IOB labels
-    assert iob_mask[0].item() == 0, "BOS should be O"
-    assert iob_mask[1].item() == 1, "'bio' should be B (Beginning)"
-    assert iob_mask[2].item() == 2, "'##in' should be I (Inside)"
-    assert iob_mask[3].item() == 2, "'##for' should be I (Inside)"
-    assert iob_mask[4].item() == 2, "'##matics' should be I (Inside)"
-    assert iob_mask[5].item() == 2, "'research' should be I (Inside)"
-    assert iob_mask[6].item() == 0, "'advances' should be O (Outside)"
-    assert iob_mask[7].item() == 0, "EOS should be O"
-
-    # --- WITH word_ids: continuation subtokens get IGNORE_IDX ---
-    iob_mask_with_word_ids = create_keyword_mask(
-        ranges, sent_tok_len, scheme="IOB", word_ids=word_ids
+    iob_mask = create_keyword_mask(
+        ranges, sent_tok_len, word_ids=word_ids, scheme="IOB"
     )
 
     # Expected: [-100, B, -100, -100, -100, I, O, -100]
-    # BOS=-100 (special), bio=B(1), ##in=-100, ##for=-100, ##matics=-100, research=I(2), advances=O(0), EOS=-100
-    assert iob_mask_with_word_ids[0].item() == IGNORE_IDX, (
-        "BOS should be IGNORE_IDX (special token)"
-    )
-    assert iob_mask_with_word_ids[1].item() == 1, "'bio' should be 1 (B, Beginning)"
-    assert iob_mask_with_word_ids[2].item() == IGNORE_IDX, (
-        "'##in' should be IGNORE_IDX (ignore)"
-    )
-    assert iob_mask_with_word_ids[3].item() == IGNORE_IDX, (
-        "'##for' should be IGNORE_IDX (ignore)"
-    )
-    assert iob_mask_with_word_ids[4].item() == IGNORE_IDX, (
-        "'##matics' should be IGNORE_IDX (ignore)"
-    )
-    assert iob_mask_with_word_ids[5].item() == 2, "'research' should be 2 (I, Inside)"
-    assert iob_mask_with_word_ids[6].item() == 0, "'advances' should be O (Outside)"
-    assert iob_mask_with_word_ids[7].item() == IGNORE_IDX, "EOS should be IGNORE_IDX"
+    assert iob_mask[0].item() == IGNORE_IDX, "BOS should be IGNORE_IDX (special token)"
+    assert iob_mask[1].item() == 1, "'bio' should be 1 (B, Beginning)"
+    assert iob_mask[2].item() == IGNORE_IDX, "'##in' should be IGNORE_IDX (ignore)"
+    assert iob_mask[3].item() == IGNORE_IDX, "'##for' should be IGNORE_IDX (ignore)"
+    assert iob_mask[4].item() == IGNORE_IDX, "'##matics' should be IGNORE_IDX (ignore)"
+    assert iob_mask[5].item() == 2, "'research' should be 2 (I, Inside)"
+    assert iob_mask[6].item() == 0, "'advances' should be O (Outside)"
+    assert iob_mask[7].item() == IGNORE_IDX, "EOS should be IGNORE_IDX"
