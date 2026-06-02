@@ -25,7 +25,7 @@ import polars as pl
 import torch
 import tqdm
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
+from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
 from keyword_pecker.data import create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.models.inference import (
@@ -217,6 +217,7 @@ def evaluate_model(
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     iob_threshold: float = 0.5,
+    word_prob: str = "first_subtoken",
     filter_punctuation: bool = True,
     disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
@@ -304,11 +305,13 @@ def evaluate_model(
             loss_fn = torch.nn.CrossEntropyLoss(
                 weight=class_weights_tensor,
                 reduction="none",
+                ignore_index=IGNORE_IDX,
             )
         else:
             loss_fn = torch.nn.CrossEntropyLoss(
                 weight=None,
                 reduction="none",
+                ignore_index=IGNORE_IDX,
             )
 
     total_loss = 0.0
@@ -351,7 +354,8 @@ def evaluate_model(
             # Collect confusion matrix data (IOB scheme only)
             if num_classes == 3:
                 preds = logits.argmax(dim=2)
-                mask = attention_mask.bool()
+                ignore_mask = target != IGNORE_IDX
+                mask = attention_mask.bool() & ignore_mask
                 cm_preds.extend(preds[mask].cpu().tolist())
                 cm_targets.extend(target[mask].cpu().tolist())
 
@@ -359,9 +363,15 @@ def evaluate_model(
             if num_classes == 2:
                 loss = loss_fn(logits, target) * attention_mask
             else:
-                loss = loss_fn(logits.transpose(1, 2), target) * attention_mask
+                ignore_mask = target != IGNORE_IDX
+                full_mask = attention_mask & ignore_mask
+                loss = loss_fn(logits.transpose(1, 2), target) * full_mask
             batch_loss = loss.sum().item()
-            batch_tokens = attention_mask.sum().item()
+            batch_tokens = (
+                attention_mask.sum().item()
+                if num_classes == 2
+                else full_mask.sum().item()
+            )
 
             total_loss += batch_loss
             total_tokens += batch_tokens
@@ -378,6 +388,7 @@ def evaluate_model(
                 word_ids=batch.get("word_ids"),
                 word_lists=batch.get("word_lists"),
                 iob_threshold=iob_threshold,
+                word_prob=word_prob,
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 
@@ -401,6 +412,7 @@ def evaluate_model(
         filter_punctuation=filter_punctuation,
         disallowed_punctuation=disallowed_punctuation,
         dedup_strategy=dedup_strategy,
+        scoring_strategy=scoring_strategy,
     )
 
     # Convert to lists for external eval module (preserve order)
