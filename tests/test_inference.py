@@ -583,7 +583,9 @@ def test_aggregate_tokens_to_words_basic():
         ]
     )
 
-    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_probs, word_ids, subtok2word_prob="average"
+    )
 
     assert word_preds == [1, 2]
     assert len(word_probs) == 2
@@ -604,7 +606,9 @@ def test_aggregate_tokens_to_words_skips_special_tokens():
         ]
     )
 
-    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_probs, word_ids, subtok2word_prob="average"
+    )
 
     assert word_preds == [1]
     assert len(word_probs) == 1
@@ -628,7 +632,9 @@ def test_aggregate_tokens_to_words_weak_prefix_strong_root():
         ]
     )
 
-    word_preds, word_probs = _aggregate_tokens_to_words(token_probs, word_ids)
+    word_preds, word_probs = _aggregate_tokens_to_words(
+        token_probs, word_ids, subtok2word_prob="average"
+    )
 
     assert len(word_preds) == 1
     assert word_preds[0] == 1  # B, not O

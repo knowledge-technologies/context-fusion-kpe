@@ -1,6 +1,7 @@
 import numpy as np
 import regex
 
+from keyword_pecker.constants import IGNORE_IDX
 from keyword_pecker.data import (
     build_keyword_regex,
     create_keyword_mask,
@@ -421,23 +422,24 @@ def test_iob_labels_with_subtoken_split_on_non_initial_keyword_word():
 
 
 def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
-    """IOB labels must propagate correctly when a keyword's initial word is split into subtokens.
+    """IOB labels must use -100 for continuation subtokens (legacy behavior).
 
     Example: keyword "bioinformatics research" where "bioinformatics" is
     tokenized as "bio", "##in", "##for", "##matics" (4 subtokens).
 
-    Expected IOB: [B, B, B, B, I, O, ...]
-      - "bio"       → B (Beginning of first word)
-      - "##in"      → B (Beginning of first word, new subtoken)
-      - "##for"     → B (Beginning of first word, new subtoken)
-      - "##matics"  → B (Beginning of first word, new subtoken)
-      - "research"  → I (Inside, second word of keyword)
+    When word_ids is provided to create_keyword_mask, only the first subtoken
+    of each word receives a label; continuation subtokens get -100 (PyTorch
+    ignore index). This matches the legacy tokenize_and_align_labels behavior.
 
-    Note: The current implementation uses word-level stem matching, so it
-    operates on word boundaries, not subtoken boundaries. When a word is
-    split into subtokens, the token range covers ALL subtokens of matched
-    words, and create_keyword_mask assigns B to the first token and I to
-    all subsequent tokens in the range.
+    Expected: [-100, B, -100, -100, -100, I, O, -100]
+      - BOS           → -100 (special token)
+      - "bio"         → B (Beginning, first subtoken of word 0)
+      - "##in"        → -100 (continuation subtoken of word 0)
+      - "##for"       → -100 (continuation subtoken of word 0)
+      - "##matics"    → -100 (continuation subtoken of word 0)
+      - "research"    → I (Inside, first subtoken of word 1)
+      - "advances"    → O (Outside, first subtoken of word 2)
+      - EOS           → -100 (special token)
     """
     stemmer = PorterStemmer()
 
@@ -446,6 +448,8 @@ def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
     # Simulate tokenizer splitting "bioinformatics" into 4 subtokens
     sentence = "bioinformatics research advances"
     keywords = ["bioinformatics research"]
+
+    word_ids = [-1, 0, 0, 0, 0, 1, 2, -1]
 
     # Build offsets simulating subtokenization:
     # Token 0: BOS [0, 0]
@@ -487,15 +491,17 @@ def test_iob_labels_with_subtoken_split_on_initial_keyword_word():
 
     # Create IOB mask and verify labels
     sent_tok_len = num_total_tokens
-    iob_mask = create_keyword_mask(ranges, sent_tok_len, scheme="IOB")
+    iob_mask = create_keyword_mask(
+        ranges, sent_tok_len, scheme="IOB", word_ids=word_ids
+    )
 
-    # Expected: [O, B, I, I, I, I, O, O]
-    # BOS=O, bio=B, ##in=I, ##for=I, ##matics=I, research=I, advances=O, EOS=O
-    assert iob_mask[0].item() == 0, "BOS should be O"
-    assert iob_mask[1].item() == 1, "'bio' should be B (Beginning)"
-    assert iob_mask[2].item() == 2, "'##in' should be I (Inside)"
-    assert iob_mask[3].item() == 2, "'##for' should be I (Inside)"
-    assert iob_mask[4].item() == 2, "'##matics' should be I (Inside)"
-    assert iob_mask[5].item() == 2, "'research' should be I (Inside)"
+    # Expected: [-100, B, -100, -100, -100, I, O, -100]
+    # BOS=-100 (special), bio=B(1), ##in=-100, ##for=-100, ##matics=-100, research=I(2), advances=O(0), EOS=-100
+    assert iob_mask[0].item() == IGNORE_IDX, "BOS should be IGNORE_IDX (special token)"
+    assert iob_mask[1].item() == 1, "'bio' should be 1 (B, Beginning)"
+    assert iob_mask[2].item() == IGNORE_IDX, "'##in' should be IGNORE_IDX (ignore)"
+    assert iob_mask[3].item() == IGNORE_IDX, "'##for' should be IGNORE_IDX (ignore)"
+    assert iob_mask[4].item() == IGNORE_IDX, "'##matics' should be IGNORE_IDX (ignore)"
+    assert iob_mask[5].item() == 2, "'research' should be 2 (I, Inside)"
     assert iob_mask[6].item() == 0, "'advances' should be O (Outside)"
-    assert iob_mask[7].item() == 0, "EOS should be O"
+    assert iob_mask[7].item() == IGNORE_IDX, "EOS should be IGNORE_IDX"
