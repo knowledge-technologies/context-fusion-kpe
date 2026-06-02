@@ -217,7 +217,7 @@ def keyphrase_collate_fn(batch: list[dict]) -> dict:
     # Initialize padded tensors
     input_ids = torch.zeros((num_rows, max_len), dtype=torch.long)
     attention_mask = torch.zeros((num_rows, max_len), dtype=torch.long)
-    target = torch.zeros((num_rows, max_len), dtype=torch.long)
+    target = torch.full((num_rows, max_len), -100, dtype=torch.long)
     word_ids = torch.full((num_rows, max_len), -1, dtype=torch.long)
 
     # Fill tensors row by row
@@ -293,7 +293,7 @@ def compute_class_weights(
 
     all_labels = []
     for mask in df["keyword_mask"].to_list():
-        all_labels.extend(mask)
+        all_labels.extend([v for v in mask if v != -100])
 
     all_labels = np.array(all_labels)
     n_samples = len(all_labels)
