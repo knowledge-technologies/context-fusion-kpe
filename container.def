@@ -1,0 +1,45 @@
+Bootstrap: docker
+From: python:3.13
+
+%post
+
+    export https_proxy="${HTTPS_PROXY}"
+    export http_proxy="${HTTP_PROXY}"
+    export no_proxy="${NO_PROXY}"
+
+    # Install uv
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+
+    # Make uv available in this %post shell
+    export PATH="/usr/local/bin:$PATH"
+
+    # Install all dependencies (core + wandb tracking extra) into /opt/venv.
+    # keyword-pecker itself is not installed here; it is provided at runtime
+    # via the /workspace bind mount + PYTHONPATH=/workspace/src.
+    uv venv --seed /opt/venv
+    uv pip install --python /opt/venv \
+        "nltk>=3.9.2" \
+        "numpy>=2.4.2" \
+        "pandas>=3.0.0" \
+        "polars>=1.38.1" \
+        "python-dotenv>=1.2.1" \
+        "pyyaml>=6.0.3" \
+        "regex>=2026.1.15" \
+        "spacy>=3.8.11" \
+        "sentencepiece>=0.2.1" \
+        "torch>=2.10.0" \
+        "tqdm>=4.67.3" \
+        "transformers>=5.1.0" \
+        "wandb>=0.19" \
+        "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl"
+
+%environment
+    export PATH="/opt/venv/bin:/root/.local/bin:$PATH"
+    # /workspace/src is the bind-mounted project source (--bind ~/<dir>:/workspace)
+    export PYTHONPATH="/workspace/src:$PYTHONPATH"
+    export https_proxy="${HTTPS_PROXY}"
+    export http_proxy="${HTTP_PROXY}"
+    export no_proxy="${NO_PROXY}"
+
+%runscript
+    exec "$@"
