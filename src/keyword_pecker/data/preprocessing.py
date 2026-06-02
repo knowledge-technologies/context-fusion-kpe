@@ -412,24 +412,24 @@ def tokenize_sentences(
 def create_keyword_mask(
     keyword_token_ranges: list[tuple[int, int]],
     sent_tok_len: int,
+    word_ids: list[int],
     scheme: str = "IOB",
     device: str = "cpu",
-    word_ids: list[int] | None = None,
 ) -> torch.Tensor:
     """Create keyword mask for tokens using binary or IOB labeling scheme.
 
-    When ``word_ids`` is provided, only the first subtoken of each word receives
-    a label; continuation subtokens are set to ``IGNORE_IDX`` (PyTorch ignore index).
-    This matches the legacy ``tokenize_and_align_labels`` behavior.
+    Only the first subtoken of each word receives a label; continuation
+    subtokens are set to ``IGNORE_IDX`` (PyTorch ignore index). This matches
+    the legacy ``tokenize_and_align_labels`` behavior.
 
     Args:
         keyword_token_ranges: List of [start, end) token index pairs (`end` is not included).
         sent_tok_len: Total number of tokens in sentence.
+        word_ids: List mapping each token to its word index (-1 for
+            special/padding tokens). Non-initial subtokens get IGNORE_IDX.
         scheme: Labeling scheme - "IOB" (0=Outside, 1=Beginning, 2=Inside) or
             "binary" (0=not keyword, 1=keyword). Defaults to "IOB".
         device: Torch device for computation.
-        word_ids: Optional list mapping each token to its word index (-1 for
-            special/padding tokens). When provided, non-initial subtokens get IGNORE_IDX.
 
     Returns:
         Tensor of shape (sent_tok_len,) with labels:
@@ -441,18 +441,15 @@ def create_keyword_mask(
             with the skip strategy in resolve_keyword_spans).
     """
 
-    # if no keyphrases in sentece
+    # if no keyphrases in sentence, return IGNORE_IDX / zeros based on word_ids
     if not keyword_token_ranges:
-        # if we have word ids, sort those to be ignored
-        if word_ids is not None:
-            targets = torch.full((sent_tok_len,), IGNORE_IDX, dtype=torch.long)
-            for t in range(sent_tok_len):
-                if word_ids[t] == -1:
-                    targets[t] = IGNORE_IDX
-                elif t == 0 or word_ids[t] != word_ids[t - 1]:
-                    targets[t] = 0
-            return targets
-        return torch.zeros(sent_tok_len, dtype=torch.long)
+        targets = torch.full((sent_tok_len,), IGNORE_IDX, dtype=torch.long)
+        for t in range(sent_tok_len):
+            if word_ids[t] == -1:
+                targets[t] = IGNORE_IDX
+            elif t == 0 or word_ids[t] != word_ids[t - 1]:
+                targets[t] = 0
+        return targets
 
     # if we have keyphrases, use token ranges
     tok_start, tok_end = zip(*keyword_token_ranges)
@@ -467,7 +464,7 @@ def create_keyword_mask(
         # pre-allocate all 1's
         targets = torch.ones_like(idxs, device=device)
 
-        # no zero-out all tokens before and after keyword
+        # zero-out all tokens before and after keyword
         # tokens for each keyword
         targets[idxs < starts.view(-1, 1)] = 0
         targets[idxs >= ends.view(-1, 1)] = 0
@@ -506,17 +503,17 @@ def create_keyword_mask(
                 f"Overlapping keywords detected: max overlap = {targets.max()}"
             )
 
-    if word_ids is not None:
-        prev_wid = None
-        for t in range(sent_tok_len):
-            wid = word_ids[t]
-            if wid == -1:
-                targets[t] = IGNORE_IDX
-            elif wid != prev_wid:
-                pass  # first subtoken of word → keep label
-            else:
-                targets[t] = IGNORE_IDX  # continuation subtoken → ignore
-            prev_wid = wid
+    # Apply word_ids: special tokens get IGNORE_IDX, continuation subtokens get IGNORE_IDX
+    prev_wid = None
+    for t in range(sent_tok_len):
+        wid = word_ids[t]
+        if wid == -1:
+            targets[t] = IGNORE_IDX
+        elif wid != prev_wid:
+            pass  # first subtoken of word → keep label
+        else:
+            targets[t] = IGNORE_IDX  # continuation subtoken → ignore
+        prev_wid = wid
 
     return targets
 
@@ -706,9 +703,9 @@ def process_document(
         keyword_mask = create_keyword_mask(
             tok_ranges,
             sent_tok_len,
+            word_ids_per_sent[s_idx][:sent_tok_len],
             scheme,
             device,
-            word_ids=word_ids_per_sent[s_idx][:sent_tok_len],
         )
 
         processed.append(
