@@ -124,7 +124,7 @@ def train(
         early_stopping_metric: Metric name to monitor (e.g., "val_loss", "f1@5").
         early_stopping_mode: "min" for lower-is-better, "max" for higher-is-better.
         early_stopping_check_every: Run validation every N optimizer steps (0 = epoch-only).
-        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
+        scoring_strategy: "confidence" for model probability scores, "unordered" for extraction order (default: "confidence").
         score_method: How to aggregate token probabilities ("average", "max", "min", "geometric") (default: "average").
         filter_punctuation: If True, remove keyphrases with disallowed punctuation (default: True).
         disallowed_punctuation: String of punctuation characters to filter (default excludes dash/apostrophe).
