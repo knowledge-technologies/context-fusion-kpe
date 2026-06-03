@@ -542,23 +542,23 @@ def test_iob_word_level_multiple_keywords():
     assert result[1][0] == "deep learning"
 
 
-def test_iob_word_level_ordinal_strategy():
-    """Test that ordinal scoring orders by occurrence, not score."""
+def test_iob_word_level_unordered_strategy():
+    """Test that unordered scoring keeps real confidence scores but skips sorting."""
     word_preds = [1, 1, 1]
     word_probs = [0.7, 0.9, 0.8]
     word_list = ["neural", "networks", "machines"]
 
     result = _extract_iob_keywords_word_level(
-        word_preds, word_probs, word_list, scoring_strategy="ordinal"
+        word_preds, word_probs, word_list, scoring_strategy="unordered"
     )
 
     assert len(result) == 3
     assert result[0][0] == "neural"
     assert result[1][0] == "networks"
     assert result[2][0] == "machines"
-    assert result[0][1] == 0.0
-    assert result[1][1] == -1.0
-    assert result[2][1] == -2.0
+    assert result[0][1] == 0.7
+    assert result[1][1] == 0.9
+    assert result[2][1] == 0.8
 
 
 # ============================================================================
