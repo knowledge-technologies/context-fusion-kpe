@@ -105,7 +105,7 @@ def parse_args() -> argparse.Namespace:
         "--scoring-strategy",
         type=str,
         default="confidence",
-        choices=["confidence", "ordinal"],
+        choices=["confidence", "unordered"],
         help="Scoring strategy (default: confidence)",
     )
     parser.add_argument(
