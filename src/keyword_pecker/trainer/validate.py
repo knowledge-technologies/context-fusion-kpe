@@ -217,7 +217,7 @@ def evaluate_model(
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     iob_threshold: float = 0.5,
-    word_prob: str = "first_subtoken",
+    subtok2word_prob: str = "first_subtoken",
     filter_punctuation: bool = True,
     disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
@@ -251,7 +251,7 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
-        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order (default: "confidence").
+        scoring_strategy: "confidence" for model probability scores, "unordered" for extraction order (default: "confidence").
         score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").
         iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
             Predictions below this threshold are treated as O. Default 0.5.
@@ -388,7 +388,7 @@ def evaluate_model(
                 word_ids=batch.get("word_ids"),
                 word_lists=batch.get("word_lists"),
                 iob_threshold=iob_threshold,
-                word_prob=word_prob,
+                subtok2word_prob=subtok2word_prob,
             )
             all_ranked_predictions.extend(batch_ranked_keywords)
 
