@@ -236,3 +236,27 @@ def test_normalize_keyphrases_empty():
 
     assert _normalize_keyphrases([[]]) == [[]]
     assert _normalize_keyphrases([]) == []
+
+
+def test_compute_confusion_matrix_basic():
+    """Test _compute_confusion_matrix with mixed correct/incorrect predictions."""
+    from keyword_pecker.trainer.validate import _compute_confusion_matrix
+
+    predictions = [0, 2, 1]
+    targets = [0, 1, 2]
+
+    cm = _compute_confusion_matrix(predictions, targets, num_classes=3)
+
+    assert cm == [[1, 0, 0], [0, 0, 1], [0, 1, 0]]
+
+
+def test_compute_confusion_matrix_perfect():
+    """Test _compute_confusion_matrix with perfect predictions (diagonal only)."""
+    from keyword_pecker.trainer.validate import _compute_confusion_matrix
+
+    predictions = [0, 1, 2, 0, 1]
+    targets = [0, 1, 2, 0, 1]
+
+    cm = _compute_confusion_matrix(predictions, targets, num_classes=3)
+
+    assert cm == [[2, 0, 0], [0, 2, 0], [0, 0, 1]]
