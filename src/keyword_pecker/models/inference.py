@@ -55,7 +55,6 @@ def _decode_binary_keyphrases(
         token_probs = probs[i, 1 : seq_len - 1]
 
         keywords_with_scores: list[tuple[str, float]] = []
-        keyword_order = 0
 
         current_tokens: list[int] = []
         current_probs: list[float] = []
@@ -72,14 +71,9 @@ def _decode_binary_keyphrases(
                     decoded = tokenizer.decode(torch.tensor(current_tokens))
                     keyword = re.sub(r" - ", "-", decoded.strip())
                     if keyword:
-                        if scoring_strategy == "ordinal":
-                            prob_score = -float(keyword_order)
-                            keyword_order += 1
-                        else:
-                            prob_score = _score_keyphrase(
-                                probs=current_probs, method=score_method
-                            )
-
+                        prob_score = _score_keyphrase(
+                            probs=current_probs, method=score_method
+                        )
                         keywords_with_scores.append((keyword, prob_score))
 
                     current_tokens = []
@@ -90,15 +84,11 @@ def _decode_binary_keyphrases(
             decoded = tokenizer.decode(torch.tensor(current_tokens))
             keyword = re.sub(r" - ", "-", decoded.strip())
             if keyword:
-                if scoring_strategy == "ordinal":
-                    kw_score = -float(keyword_order)
-                else:
-                    kw_score = _score_keyphrase(
-                        probs=current_probs, method=score_method
-                    )
+                kw_score = _score_keyphrase(probs=current_probs, method=score_method)
                 keywords_with_scores.append((keyword, kw_score))
 
-        keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+        if scoring_strategy != "unordered":
+            keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
         all_keyphrases.append(keywords_with_scores)
 
@@ -175,7 +165,7 @@ def _extract_iob_keywords_word_level(
         word_preds: Word-level class IDs (0=O, 1=B, 2=I), one per word.
         word_probs: Word-level confidence scores, one per word.
         word_list: The actual word strings, indexed to match word_preds.
-        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order.
+        scoring_strategy: "confidence" for model probability scores, "unordered" for extraction order.
         score_method: How to aggregate word probs ("average", "max", "min", "geometric").
         iob_threshold: Minimum confidence for B/I predictions to be accepted.
             Predictions below this threshold are treated as O.
@@ -187,7 +177,6 @@ def _extract_iob_keywords_word_level(
     keyphrases = []
     keyphrase_words = []
     keyphrase_probs = []
-    keyphrase_order = 0
 
     for idx in range(len(word_preds)):
         pred = word_preds[idx]
@@ -196,11 +185,7 @@ def _extract_iob_keywords_word_level(
         if pred == 1 and prob >= iob_threshold:  # B-tag: start of a new keyphrase
             if keyphrase_words:
                 kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
-                if scoring_strategy == "ordinal":
-                    score = -float(keyphrase_order)
-                    keyphrase_order += 1
-                else:
-                    score = _score_keyphrase(keyphrase_probs, score_method)
+                score = _score_keyphrase(keyphrase_probs, score_method)
                 keyphrases.append((kp, score))
                 keyphrase_words = []
                 keyphrase_probs = []
@@ -217,21 +202,14 @@ def _extract_iob_keywords_word_level(
         else:  # O-tag or low-confidence B/I: outside any keyphrase
             if keyphrase_words:
                 kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
-                if scoring_strategy == "ordinal":
-                    score = -float(keyphrase_order)
-                    keyphrase_order += 1
-                else:
-                    score = _score_keyphrase(keyphrase_probs, score_method)
+                score = _score_keyphrase(keyphrase_probs, score_method)
                 keyphrases.append((kp, score))
                 keyphrase_words = []
                 keyphrase_probs = []
 
     if keyphrase_words:
         kp = re.sub(r" - ", "-", " ".join(keyphrase_words))
-        if scoring_strategy == "ordinal":
-            score = -float(keyphrase_order)
-        else:
-            score = _score_keyphrase(keyphrase_probs, score_method)
+        score = _score_keyphrase(keyphrase_probs, score_method)
         keyphrases.append((kp, score))
 
     return keyphrases
@@ -306,7 +284,6 @@ def _decode_iob_keyphrases(
             token_probs = probs[i, 1 : seq_len - 1]
 
             keywords_with_scores: list[tuple[str, float]] = []
-            keyword_order = 0
 
             current_tokens: list[int] = []
             current_probs: list[float] = []
@@ -320,13 +297,9 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            if scoring_strategy == "ordinal":
-                                prob_score = -float(keyword_order)
-                                keyword_order += 1
-                            else:
-                                prob_score = _score_keyphrase(
-                                    probs=current_probs, method=score_method
-                                )
+                            prob_score = _score_keyphrase(
+                                probs=current_probs, method=score_method
+                            )
                             keywords_with_scores.append((keyword, prob_score))
 
                     current_tokens = [int(token_ids[j].item())]
@@ -342,13 +315,9 @@ def _decode_iob_keyphrases(
                         decoded = tokenizer.decode(torch.tensor(current_tokens))
                         keyword = re.sub(r" - ", "-", decoded.strip())
                         if keyword:
-                            if scoring_strategy == "ordinal":
-                                prob_score = -float(keyword_order)
-                                keyword_order += 1
-                            else:
-                                prob_score = _score_keyphrase(
-                                    probs=current_probs, method=score_method
-                                )
+                            prob_score = _score_keyphrase(
+                                probs=current_probs, method=score_method
+                            )
 
                             keywords_with_scores.append((keyword, prob_score))
                         current_tokens = []
@@ -359,15 +328,13 @@ def _decode_iob_keyphrases(
                 decoded = tokenizer.decode(torch.tensor(current_tokens))
                 keyword = re.sub(r" - ", "-", decoded.strip())
                 if keyword:
-                    if scoring_strategy == "ordinal":
-                        prob_score = -float(keyword_order)
-                    else:
-                        prob_score = _score_keyphrase(
-                            probs=current_probs, method=score_method
-                        )
+                    prob_score = _score_keyphrase(
+                        probs=current_probs, method=score_method
+                    )
                     keywords_with_scores.append((keyword, prob_score))
 
-            keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+            if scoring_strategy != "unordered":
+                keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
 
             sentence_keyphrases = keywords_with_scores
 
@@ -555,8 +522,8 @@ def aggregate_document_keyphrases(
         # Step 5: Sort by score descending or use unordered (legacy set() behavior)
         deduped = list(seen.values())
         if scoring_strategy == "unordered":
-            unique_kws = list(set(kw for kw, _ in deduped))
-            deduped = [(kw, 0.0) for kw in unique_kws]
+            kw_to_score = {kw: score for kw, score in deduped}
+            deduped = [(kw, kw_to_score[kw]) for kw in set(kw_to_score)]
         else:
             deduped.sort(key=lambda x: x[1], reverse=True)
 
@@ -608,7 +575,7 @@ def predict_keyphrases(
         device: Device for inference. If None, uses the device of model parameters.
         nr_keyphrases: Maximum number of keyphrases to return. If None, uses
             the default from evaluation config (typically 10).
-        scoring_strategy: "confidence" for model probability scores, "ordinal" for extraction order.
+        scoring_strategy: "confidence" for model probability scores, "unordered" for extraction order.
         score_method: How to aggregate token probs ("average", "max", "min", "geometric").
         iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
             Predictions below this threshold are treated as O. Default 0.5.
