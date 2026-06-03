@@ -302,6 +302,7 @@ def main() -> None:
             inner_batch_size=hyperparams["inner_batch_size"],
             base_lr=hyperparams["base_lr"],
             head_lr=hyperparams["head_lr"],
+            adam_eps=hyperparams.get("adam_eps", 1e-6),
             num_classes=hyperparams["num_classes"],
             use_class_weights=use_class_weights,
             class_weights=hyperparams.get("class_weights"),

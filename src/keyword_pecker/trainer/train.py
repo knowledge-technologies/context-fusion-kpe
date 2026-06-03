@@ -59,6 +59,7 @@ def train(
     inner_batch_size: int,
     base_lr: float,
     head_lr: float,
+    adam_eps: float = 1e-6,
     num_classes: int = 3,
     use_class_weights: bool = True,
     class_weights: list[float] | None = None,
@@ -101,6 +102,7 @@ def train(
         inner_batch_size: Sentences per forward pass.
         base_lr: Learning rate for base encoder parameters.
         head_lr: Learning rate for refinement head parameters.
+        adam_eps: Epsilon for AdamW optimizer (default: 1e-6).
         num_classes: Number of output classes (2 for binary, 3 for IOB).
         use_class_weights: Whether to apply class weights in loss function.
             If False, uses equal weighting (CrossEntropyLoss with weight=None).
@@ -135,7 +137,7 @@ def train(
         set_random_seeds(seed)
 
     optimizer = torch.optim.AdamW(
-        model.get_param_groups(base_lr=base_lr, head_lr=head_lr)
+        model.get_param_groups(base_lr=base_lr, head_lr=head_lr), eps=adam_eps
     )
 
     total_steps = math.ceil(len(train_df) / outer_batch_size) * epochs
