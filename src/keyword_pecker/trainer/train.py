@@ -21,7 +21,11 @@ from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
 from keyword_pecker.data import compute_class_weights, create_keyphrase_dataloader
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer.early_stopping import EarlyStopping
-from keyword_pecker.trainer.validate import evaluate_model
+from keyword_pecker.trainer.validate import (
+    _compute_confusion_matrix,
+    _log_confusion_matrix_to_wandb,
+    evaluate_model,
+)
 from keyword_pecker.utils import get_logger, set_random_seeds
 
 logger = get_logger("train")
@@ -234,6 +238,8 @@ def train(
     best_step: int | None = None
     last_val_metrics: dict | None = None
     exit_reason = "completed"
+    cm_train_preds: list[int] = []
+    cm_train_targets: list[int] = []
 
     metrics_file = metrics_filename.open("a")
 
@@ -288,6 +294,9 @@ def train(
                 if num_classes != 2:
                     epoch_raw_loss_sum += raw_loss_sum
                     epoch_token_count += raw_token_count
+                    preds = logits.argmax(dim=2)
+                    cm_train_preds.extend(preds[full_mask].cpu().tolist())
+                    cm_train_targets.extend(target[full_mask].cpu().tolist())
 
                 del logits, loss, input_ids, attention_mask, target
                 if device.type == "cuda":
@@ -319,13 +328,24 @@ def train(
                             metrics_file.flush()
 
                             if wandb:
-                                wandb.log(
-                                    {
-                                        "train/loss": last_loss,
-                                        "train/learning_rate": get_lr(),
-                                    },
-                                    step=global_step,
-                                )
+                                wandb_log = {
+                                    "train/loss": last_loss,
+                                    "train/learning_rate": get_lr(),
+                                }
+                                if num_classes == 3 and cm_train_preds:
+                                    cm = _compute_confusion_matrix(
+                                        cm_train_preds, cm_train_targets, num_classes=3
+                                    )
+                                    _log_confusion_matrix_to_wandb(
+                                        cm,
+                                        class_labels=["O", "B", "I"],
+                                        split="train",
+                                        wandb=wandb,
+                                        global_step=global_step,
+                                    )
+                                    cm_train_preds.clear()
+                                    cm_train_targets.clear()
+                                wandb.log(wandb_log, step=global_step)
 
                     outer_step += 1
                     global_step += 1
