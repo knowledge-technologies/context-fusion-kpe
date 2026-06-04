@@ -23,9 +23,9 @@ import regex
 import spacy
 import torch
 from nltk.stem.porter import PorterStemmer
+from nltk import word_tokenize
 from tqdm import tqdm
 from transformers import AutoTokenizer
-from transformers.tokenization_utils_base import BatchEncoding
 
 from keyword_pecker.constants import IGNORE_IDX
 from keyword_pecker.utils import get_logger
@@ -124,6 +124,28 @@ def _normalize_text(text: str) -> str:
     text = text.replace("/", " ")
     text = text.replace("∗", " ")
     return text
+
+
+def pretokenize_sentence(sentence: str) -> list[str]:
+    """Pre-tokenize a sentence using NLTK word_tokenize with legacy normalization.
+
+    Mirrors the legacy preprocess_text() approach:
+    1. Normalize text (hyphens/slashes/asterisks → spaces)
+    2. Tokenize with NLTK word_tokenize
+    3. Lowercase all tokens
+
+    This produces a reliable word list that the HF tokenizer can consume
+    with is_split_into_words=True, making word_ids() tokenizer-agnostic.
+
+    Args:
+        sentence: Raw sentence text.
+
+    Returns:
+        List of lowercase word tokens.
+    """
+    normalized = _normalize_text(sentence)
+    tokens = word_tokenize(normalized)
+    return [w.lower() for w in tokens]
 
 
 def build_keyword_regex(
@@ -228,110 +250,98 @@ def resolve_keyword_spans(
 
 
 def resolve_keyword_spans_stem(
-    sentence: str,
-    offsets: np.ndarray,
-    num_total_tokens: int,
+    words: list[str],
     keywords: list[str],
     stemmer: PorterStemmer,
 ) -> tuple[list[str], list[tuple[int, int]]]:
-    """Resolve keyword spans using stem-equality matching (legacy gold-standard approach).
+    """Resolve keyword spans using stem-equality matching on a word list.
 
-    Instead of regex matching, this function uses word-level stem equality:
-    for each position in the document, it checks whether the stems of the
-    document words match the stems of the keyword words exactly. This is the
-    same algorithm used in the legacy preprocessing.py tokenize_doc function.
+    Operates on word indices instead of character offsets. For each position
+    in the word list, checks whether the stems of the document words match
+    the stems of the keyword words exactly. This is the same algorithm used
+    in the legacy preprocessing.py tokenize_doc function.
 
-    The key advantage over regex is symmetry: stem("aims") == "aim" which is
-    not equal to stem("ai") == "ai", so keyword "ai" will NOT match "aims".
-    A stem-prefix regex \\b{stem}\\w*\\b would incorrectly match "aims" for
-    keyword "ai" because "aims" starts with "ai".
-
-    Character offsets from the matched word spans are looked up in the same
-    token_boundaries array as resolve_keyword_spans, so the token index
-    mapping is identical.
+    Returns word-index ranges (word_start, word_end) where word_end is exclusive.
+    These must be converted to token-index ranges via word_ranges_to_token_ranges()
+    before passing to create_keyword_mask().
 
     Args:
-        sentence: Lowercased sentence text.
-        offsets: Token offset mapping from tokenizer (shape: [seq_len, 2]).
-        num_total_tokens: Number of tokens (excluding padding).
-        keywords: List of keyword phrases (lowercased).
+        words: List of lowercase word tokens (from pretokenize_sentence).
+        keywords: List of keyword phrases (lowercased, normalized).
         stemmer: Porter stemmer instance.
 
     Returns:
-        Tuple of (matched_keywords, token_ranges):
+        Tuple of (matched_keywords, word_ranges):
         - matched_keywords: List of keyword strings found in sentence.
-        - token_ranges: List of (start_tok, end_tok) tuples.
-
-    Note:
-        Handles overlapping keywords by skipping subsequent matches.
-        Handles truncation by stopping when keyword extends beyond tokens.
+        - word_ranges: List of (word_start, word_end) tuples (end exclusive).
     """
-    kwds, word_token_slice_ixs = [], []
+    kwds, word_ranges = [], []
 
-    # Build token_boundaries array (identical to resolve_keyword_spans)
-    last_token_ends_at = offsets[num_total_tokens - 2, 1]
-    token_boundaries = np.zeros(len(sentence) + 1, dtype=np.int64)
-    token_boundaries[offsets[1:-1, 0]] = 1
-    token_boundaries = np.cumsum(token_boundaries)
+    stemmed_doc_words = [stemmer.stem(w) for w in words]
 
-    covered_spans = np.zeros(len(sentence) + 1)
-
-    # Extract word spans from sentence with their character positions.
-    # \b\w+\b ensures we match complete words only (same word-boundary
-    # semantics as the legacy word_tokenize approach, without NLTK dependency).
-    word_spans: list[tuple[str, int, int]] = [
-        (m.group(0), m.start(), m.end()) for m in regex.finditer(r"\b\w+\b", sentence)
-    ]
-    stemmed_doc_words = [stemmer.stem(w) for w, _, _ in word_spans]
-
-    # Pre-stem all keyword phrases once
     stemmed_keywords: list[list[str]] = [
         [stemmer.stem(w) for w in kw.split()] for kw in keywords
     ]
 
-    n_words = len(word_spans)
+    n_words = len(words)
 
-    # Sort by keyword length descending (longest-first), same priority as
-    # the regex approach, to prefer longer matches over shorter overlapping ones
     kw_order = sorted(
         range(len(keywords)),
         key=lambda i: len(stemmed_keywords[i]),
         reverse=True,
     )
 
+    covered: set[int] = set()
+
     for kw_idx in kw_order:
         stemmed_kw = stemmed_keywords[kw_idx]
         kw_len = len(stemmed_kw)
 
         for j in range(n_words - kw_len + 1):
-            # Stem-equality check: every word in the keyword must match
+            if any(w in covered for w in range(j, j + kw_len)):
+                continue
+
             if any(stemmed_doc_words[j + k] != stemmed_kw[k] for k in range(kw_len)):
                 continue
 
-            # Found a stem-equal match; get character span
-            _, char_start, _ = word_spans[j]
-            _, _, char_end = word_spans[j + kw_len - 1]
+            matched_text = " ".join(words[j : j + kw_len])
+            kwds.append(matched_text)
+            word_ranges.append((j, j + kw_len))
+            for w in range(j, j + kw_len):
+                covered.add(w)
 
-            if covered_spans[char_start:char_end].sum() > 0:
-                # Overlapping with an already-matched keyword; skip
-                continue
+    return kwds, word_ranges
 
-            if char_end > last_token_ends_at:
-                # Sentence was truncated; keyword extends beyond tokenized region
-                continue
 
-            # The matched surface form is the original sentence text for the span
-            w_string = sentence[char_start:char_end]
-            kwds.append(w_string)
-            word_token_slice_ixs.append(
-                (
-                    token_boundaries[char_start].item(),
-                    token_boundaries[char_end - 1].item() + 1,
-                )
-            )
-            covered_spans[char_start:char_end] = 1
+def word_ranges_to_token_ranges(
+    word_ranges: list[tuple[int, int]],
+    word_ids: list[int],
+) -> list[tuple[int, int]]:
+    """Convert word-index ranges to token-index ranges.
 
-    return kwds, word_token_slice_ixs
+    For each (word_start, word_end) range, finds the first token index
+    where word_ids[t] == word_start and the last token where word_ids[t] == word_end - 1,
+    returning (tok_start, tok_end + 1) for compatibility with create_keyword_mask().
+
+    Args:
+        word_ranges: List of (word_start, word_end) tuples from resolve_keyword_spans_stem.
+        word_ids: List mapping each token to its word index (-1 for special/padding).
+
+    Returns:
+        List of (tok_start, tok_end) tuples (end exclusive).
+    """
+    token_ranges = []
+    for w_start, w_end in word_ranges:
+        tok_start = None
+        tok_end = None
+        for t, wid in enumerate(word_ids):
+            if wid == w_start and tok_start is None:
+                tok_start = t
+            if wid == w_end - 1:
+                tok_end = t
+        if tok_start is not None and tok_end is not None:
+            token_ranges.append((tok_start, tok_end + 1))
+    return token_ranges
 
 
 # ============================================================================
@@ -340,70 +350,59 @@ def resolve_keyword_spans_stem(
 
 
 def extract_word_level_data(
-    batch_tokenized: BatchEncoding,
-    batch_sentence_strings: list[str],
+    batch_tokenized: dict[str, Any],
+    batch_word_lists: list[list[str]],
 ) -> tuple[list[list[int]], list[list[str]]]:
-    """Extract word_ids and word_lists from a tokenized batch.
+    """Extract word_ids from a tokenized batch and pair with pre-built word lists.
 
-    Builds word_lists from offset_mapping (not sentence.split()) to handle
-    tokenizers that assign separate word_ids to punctuation or hyphens.
-    E.g. "state-of-the-art" gets 8 word_ids but split() gives 1 element.
+    With is_split_into_words=True, word_ids() is reliable and tokenizer-agnostic.
+    Word lists come from pretokenize_sentence(), not reconstructed from offsets.
 
     Args:
-        batch_tokenized: Tokenizer output (BatchEncoding) with word_ids()
-            and offset_mapping available.
-        batch_sentence_strings: Original sentence texts, one per batch item.
+        batch_tokenized: Tokenizer output (BatchEncoding) with word_ids().
+        batch_word_lists: Pre-built word lists from pretokenize_sentence(), one per sentence.
 
     Returns:
         Tuple of (word_ids_per_sent, word_lists_per_sent):
         - word_ids_per_sent: List of word_id lists, one per sentence.
           Each list maps tokens to word indices (-1 for special/padding).
         - word_lists_per_sent: List of word lists, one per sentence.
-          Each list is indexed by word_id.
     """
     word_ids_per_sent = []
-    word_lists_per_sent = []
+    n_sentences = len(batch_word_lists)
 
-    for s_idx in range(len(batch_sentence_strings)):
+    for s_idx in range(n_sentences):
         wid_list = batch_tokenized.word_ids(batch_index=s_idx)
         word_ids_per_sent.append([w if w is not None else -1 for w in wid_list])
 
-        offsets = batch_tokenized["offset_mapping"][s_idx]
-        word_offsets: dict[int, list[tuple[int, int]]] = {}
-        for tok_idx, wid in enumerate(wid_list):
-            if wid is not None:
-                word_offsets.setdefault(wid, []).append(offsets[tok_idx])
-        word_map = {}
-        for wid, offs in word_offsets.items():
-            char_start = min(o[0] for o in offs)
-            char_end = max(o[1] for o in offs)
-            word_map[wid] = batch_sentence_strings[s_idx][char_start:char_end]
-        word_lists_per_sent.append([word_map[i] for i in range(len(word_map))])
-
-    return word_ids_per_sent, word_lists_per_sent
+    return word_ids_per_sent, batch_word_lists
 
 
 def tokenize_sentences(
-    sentences: list[str],
+    word_lists: list[list[str]],
     tokenizer: AutoTokenizer,
     truncation: bool = True,
     padding: bool = True,
 ) -> dict[str, Any]:
-    """Tokenize sentences with offset mapping.
+    """Tokenize pre-tokenized word lists with is_split_into_words=True.
+
+    Using is_split_into_words=True makes word_ids() reliable and
+    tokenizer-agnostic, fixing edge cases with hyphenated keyphrases
+    and acronyms in parentheses.
 
     Args:
-        sentences: List of sentence texts.
+        word_lists: List of word lists (one per sentence), from pretokenize_sentence.
         tokenizer: HuggingFace tokenizer.
         truncation: Whether to truncate sequences exceeding model_max_length.
         padding: Whether to pad sequences to longest in batch.
 
     Returns:
-        Tokenizer output dict with input_ids, attention_mask, offset_mapping.
+        Tokenizer output dict with input_ids, attention_mask.
     """
     return tokenizer(
-        sentences,
+        word_lists,
+        is_split_into_words=True,
         return_tensors="pt",
-        return_offsets_mapping=True,
         truncation=truncation,
         padding=padding,
     )
@@ -656,54 +655,46 @@ def process_document(
     # Normalize keywords to match legacy behavior (lowercase + replace -, /, ∗ with spaces)
     normalized_keywords = [_normalize_text(kw).lower() for kw in keywords]
 
-    # Tokenize all sentences at once (on original text for HF tokenizer)
+    # Pre-tokenize all sentences with NLTK
+    word_lists = [pretokenize_sentence(sent) for sent in sentences]
+
+    # Tokenize word lists with is_split_into_words=True (makes word_ids reliable)
     tokenized = tokenize_sentences(
-        sentences, tokenizer, truncation=truncation, padding=padding
+        word_lists, tokenizer, truncation=truncation, padding=padding
     )
 
-    # Extract word_ids and word_lists using tokenizer word boundaries
-    word_ids_per_sent, word_lists_per_sent = extract_word_level_data(
-        tokenized, sentences
-    )
-
-    offset_mapping = tokenized.pop("offset_mapping")
-
-    # Build regex pattern once (only needed for stem_regex mode)
-    regex_pattern = (
-        build_keyword_regex(normalized_keywords, stemmer)
-        if match_mode == "stem_regex"
-        else None
-    )
+    # Extract word_ids (now reliable) and pair with pre-built word lists
+    word_ids_per_sent, _ = extract_word_level_data(tokenized, word_lists)
 
     for s_idx, sent in enumerate(sentences):
         sent_tok_len = tokenized.attention_mask[s_idx].sum().item()
+        word_ids = word_ids_per_sent[s_idx][:sent_tok_len]
+        words = word_lists[s_idx]
 
-        # Normalize sentence text for keyword matching (positions preserved since
-        # -, /, ∗ are all single-char → single-space replacements)
-        sent_normalized = _normalize_text(sent).lower()
-
-        # Resolve keywords in this sentence
+        # Resolve keywords on the word list
         if match_mode == "stem_equality":
-            sent_kwds, tok_ranges = resolve_keyword_spans_stem(
-                sent_normalized,
-                offset_mapping[s_idx].numpy(),
-                sent_tok_len,
+            sent_kwds, word_ranges = resolve_keyword_spans_stem(
+                words,
                 normalized_keywords,
                 stemmer,
             )
+            tok_ranges = word_ranges_to_token_ranges(word_ranges, word_ids)
         else:
+            # stem_regex mode still uses the old offset-based approach
+            # (kept for backward compatibility, but less reliable)
             sent_kwds, tok_ranges = resolve_keyword_spans(
-                sent_normalized,
-                offset_mapping[s_idx].numpy(),
-                sent_tok_len,
-                regex_pattern,
+                _normalize_text(sent).lower(),
+                np.array([[0, 0]] + [[0, 0]] * len(words) + [[0, 0]], dtype=np.int64),
+                len(words) + 2,
+                build_keyword_regex(normalized_keywords, stemmer),
             )
+            tok_ranges = [(s - 1, e - 1) for s, e in tok_ranges]
 
         # Create keyword mask
         keyword_mask = create_keyword_mask(
             tok_ranges,
             sent_tok_len,
-            word_ids_per_sent[s_idx][:sent_tok_len],
+            word_ids,
             scheme,
             device,
         )
@@ -721,8 +712,8 @@ def process_document(
                     s_idx, :sent_tok_len
                 ].tolist(),
                 "keyword_mask": keyword_mask.tolist(),
-                "word_ids": word_ids_per_sent[s_idx][:sent_tok_len],
-                "word_list": word_lists_per_sent[s_idx],
+                "word_ids": word_ids,
+                "word_list": words,
             }
         )
 
