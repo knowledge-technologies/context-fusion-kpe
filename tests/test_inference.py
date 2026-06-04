@@ -3,7 +3,7 @@
 import torch
 from transformers import AutoTokenizer
 
-from keyword_pecker.data import extract_word_level_data
+from keyword_pecker.data import extract_word_level_data, pretokenize_sentence
 from keyword_pecker.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
@@ -701,12 +701,12 @@ def test_iob_subword_fallback():
 def test_extract_ranked_keyphrases_with_word_ids():
     """Test that word_ids/word_lists are passed through to word-level extraction."""
     text = "machine learning is great"
-    encoded = _TOKENIZER(text, return_tensors="pt", return_offsets_mapping=True)
+    word_lists = [pretokenize_sentence(text)]
+    encoded = _TOKENIZER(word_lists, return_tensors="pt", is_split_into_words=True)
     input_ids = encoded["input_ids"]
     attention_mask = encoded["attention_mask"]
 
-    # Build word_ids and word_list using the shared helper
-    word_ids_batch, word_lists = extract_word_level_data(encoded, [text])
+    word_ids_batch, returned_word_lists = extract_word_level_data(encoded, word_lists)
     word_ids = torch.tensor(word_ids_batch)
 
     logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
@@ -721,7 +721,7 @@ def test_extract_ranked_keyphrases_with_word_ids():
         _TOKENIZER,
         num_classes=3,
         word_ids=word_ids,
-        word_lists=word_lists,
+        word_lists=returned_word_lists,
     )
 
     assert len(results) == 1
@@ -734,20 +734,21 @@ def test_extract_ranked_keyphrases_with_word_ids():
 def test_extract_ranked_keyphrases_with_hyphenated_keyword():
     """Test word-level extraction with hyphenated keyword like 'state-of-the-art'.
 
-    The tokenizer splits hyphens into separate word_ids, so the word_list
-    contains ['state', '-', 'of', '-', 'the', '-', 'art', 'methods'].
+    NLTK pre-tokenization normalizes hyphens to spaces, so word_list
+    contains ['state', 'of', 'the', 'art', 'methods'].
     When all are tagged as part of a keyphrase, the result is space-joined.
     """
     text = "state-of-the-art methods are popular"
-    encoded = _TOKENIZER(text, return_tensors="pt", return_offsets_mapping=True)
+    word_lists = [pretokenize_sentence(text)]
+    encoded = _TOKENIZER(word_lists, return_tensors="pt", is_split_into_words=True)
     input_ids = encoded["input_ids"]
     attention_mask = encoded["attention_mask"]
 
-    word_ids_batch, word_lists = extract_word_level_data(encoded, [text])
+    word_ids_batch, returned_word_lists = extract_word_level_data(encoded, word_lists)
     word_ids = torch.tensor(word_ids_batch)
 
     # Set B-tag on first token (word 0, "state"), I-tags on all tokens
-    # through "methods" (word 7) to form a single keyphrase
+    # through "methods" (word 4) to form a single keyphrase
     logits = torch.zeros(input_ids.shape[0], input_ids.shape[1], 3, dtype=torch.float)
     wid_list = encoded.word_ids(batch_index=0)
     seq_len = attention_mask[0].sum().item()
@@ -755,7 +756,7 @@ def test_extract_ranked_keyphrases_with_hyphenated_keyword():
         wid = wid_list[tok_idx]
         if wid == 0:
             logits[0, tok_idx, 1] = 5.0  # B-tag on first word
-        elif wid is not None and wid <= 7:
+        elif wid is not None and wid <= 4:
             logits[0, tok_idx, 2] = 5.0  # I-tag on remaining words
 
     results = extract_ranked_keyphrases(
@@ -771,8 +772,8 @@ def test_extract_ranked_keyphrases_with_hyphenated_keyword():
     assert len(results) == 1
     assert len(results[0]) == 1
     keyword, score = results[0][0]
-    # hyphens are rejoined to their adjacent words
-    assert keyword == "state-of-the-art methods"
+    # NLTK pre-tokenization normalizes hyphens to spaces
+    assert keyword == "state of the art methods"
     assert score > 0.5
 
 
