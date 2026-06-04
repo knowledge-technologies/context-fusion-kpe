@@ -295,8 +295,8 @@ def train(
                     epoch_raw_loss_sum += raw_loss_sum
                     epoch_token_count += raw_token_count
                     preds = logits.argmax(dim=2)
-                    cm_train_preds.extend(preds[full_mask].cpu().tolist())
-                    cm_train_targets.extend(target[full_mask].cpu().tolist())
+                    cm_train_preds.extend(preds[full_mask].cpu().flatten().tolist())
+                    cm_train_targets.extend(target[full_mask].cpu().flatten().tolist())
 
                 del logits, loss, input_ids, attention_mask, target
                 if device.type == "cuda":

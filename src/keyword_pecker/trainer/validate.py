@@ -356,8 +356,8 @@ def evaluate_model(
                 preds = logits.argmax(dim=2)
                 ignore_mask = target != IGNORE_IDX
                 mask = attention_mask.bool() & ignore_mask
-                cm_preds.extend(preds[mask].cpu().tolist())
-                cm_targets.extend(target[mask].cpu().tolist())
+                cm_preds.extend(preds[mask].cpu().flatten().tolist())
+                cm_targets.extend(target[mask].cpu().flatten().tolist())
 
             # Compute masked loss
             if num_classes == 2:
