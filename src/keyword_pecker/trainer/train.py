@@ -282,7 +282,7 @@ def train(
                     loss = loss_fn(logits, target) * attention_mask
                 else:
                     ignore_mask = target != IGNORE_IDX
-                    full_mask = attention_mask & ignore_mask
+                    full_mask = attention_mask.bool() & ignore_mask
                     loss = loss_fn(logits.transpose(1, 2), target) * full_mask
                     raw_loss_sum = loss.sum().item()
                     raw_token_count = full_mask.sum().item()
