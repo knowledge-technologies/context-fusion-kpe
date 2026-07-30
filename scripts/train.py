@@ -103,7 +103,13 @@ def parse_args() -> argparse.Namespace:
         "--warmup-ratio",
         type=float,
         default=0.1,
-        help="Fraction of training steps for warmup (default: 0.1)",
+        help="Fraction of training steps for warmup (default: 0.1). Ignored if --warmup-steps is set.",
+    )
+    parser.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=None,
+        help="Absolute number of warmup steps (overrides --warmup-ratio when set)",
     )
     parser.add_argument(
         "--no-scheduler",
@@ -229,6 +235,7 @@ def main() -> None:
             "scheme": args.scheme,
             "num_classes": args.num_classes,
             "warmup_ratio": args.warmup_ratio,
+            "warmup_steps": args.warmup_steps,
             "use_scheduler": not args.no_scheduler,
             "log_every": args.log_every,
             "device": args.device,
@@ -307,6 +314,7 @@ def main() -> None:
             use_class_weights=use_class_weights,
             class_weights=hyperparams.get("class_weights"),
             warmup_ratio=hyperparams["warmup_ratio"],
+            warmup_steps=hyperparams.get("warmup_steps"),
             use_scheduler=hyperparams.get("use_scheduler", True),
             log_every=hyperparams["log_every"],
             device=device,

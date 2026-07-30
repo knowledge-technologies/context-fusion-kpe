@@ -76,6 +76,7 @@ def train(
     val_df: pl.DataFrame | None = None,
     val_batch_size: int = 100,
     warmup_ratio: float = 0.1,
+    warmup_steps: int | None = None,
     use_scheduler: bool = True,
     k_values: list[int | str] | None = None,
     early_stopping_patience: int = 0,
@@ -123,6 +124,9 @@ def train(
         val_df: Optional Polars DataFrame for validation (same schema as train_df).
         val_batch_size: Batch size for validation forward passes (default: 100).
         warmup_ratio: Fraction of training steps for warmup (default: 0.1).
+            Ignored when warmup_steps is provided.
+        warmup_steps: Absolute number of warmup steps. When set, overrides
+            warmup_ratio (default: None).
         use_scheduler: Whether to use a learning rate scheduler (default: True).
         k_values: List of k values for @k metrics (default: [5, 10]).
         early_stopping_patience: Checks without improvement before stopping (0 = disabled).
@@ -145,16 +149,19 @@ def train(
     )
 
     total_steps = math.ceil(len(train_df) / outer_batch_size) * epochs
-    warmup_steps = int(total_steps * warmup_ratio)
+    if warmup_steps is not None:
+        num_warmup = warmup_steps
+    else:
+        num_warmup = int(total_steps * warmup_ratio)
 
     if use_scheduler:
         scheduler = get_linear_schedule_with_warmup(
             optimizer,
-            num_warmup_steps=warmup_steps,
+            num_warmup_steps=num_warmup,
             num_training_steps=total_steps,
         )
         logger.info(
-            f"LR scheduler: {warmup_steps} warmup steps / {total_steps} total steps"
+            f"LR scheduler: {num_warmup} warmup steps / {total_steps} total steps"
         )
     else:
         scheduler = None
@@ -307,8 +314,10 @@ def train(
                 # Complete outer batch: gradients accumulated for `inner_per_outer` inner batches
                 # Step optimizer (update weights) and scheduler, then zero gradients
                 # Note: zero_grad() called AFTER step() to prepare for next accumulation cycle
+
                 if inner_count == inner_per_outer:
                     optimizer.step()
+
                     if scheduler is not None:
                         scheduler.step()
                     optimizer.zero_grad()
