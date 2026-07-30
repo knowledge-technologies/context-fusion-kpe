@@ -19,8 +19,8 @@ SERVER ?= kt-gpu2
 
 ifeq ($(SERVER),kt-gpu4)
   REMOTE_HOST = $(KT_GPU4_HOST)
-  REMOTE_DATA_DIR = /cache/$(USERNAME)/$(FOLDER_NAME)/data
-  REMOTE_PROJECT_DIR = /cache/$(USERNAME)/$(FOLDER_NAME)
+  REMOTE_DATA_DIR = ~/data/$(FOLDER_NAME)
+  REMOTE_PROJECT_DIR = ~$(USERNAME)/$(FOLDER_NAME)
 else
   REMOTE_HOST = $(KT_GPU2_HOST)
   REMOTE_DATA_DIR = ~/data/keyword-pecker
@@ -38,7 +38,7 @@ endif
 # ============================================================================
 
 # Build the Apptainer image from container.def
-out/container.sif: container.def pyproject.toml uv.lock
+out/container.sif: container.def
 > mkdir -p out
 > apptainer build --force --fakeroot out/container.sif container.def
 
@@ -126,6 +126,7 @@ shell-remote:
 shell-remote-data:
 > ssh -t ${USERNAME}@${REMOTE_HOST} \
 >     "apptainer shell --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
+>         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
 >         ${REMOTE_PROJECT_DIR}/out/container.sif"
@@ -238,7 +239,7 @@ endif
 
 # One-time setup for KT-GPU4: create project directories on /cache
 slurm-setup:
-> ssh ${USERNAME}@${REMOTE_HOST} "mkdir -p /cache/${USERNAME}/${FOLDER_NAME}/{logs,out,data}"
+> ssh ${USERNAME}@${REMOTE_HOST} "mkdir -p ~/${USERNAME}/${FOLDER_NAME}/{logs,out,data}"
 .PHONY: slurm-setup
 
 # Check SLURM job queue
@@ -251,7 +252,7 @@ slurm-logs:
 ifndef JOB_ID
 > $(error JOB_ID is required. Usage: make slurm-logs JOB_ID=12345)
 endif
-> ssh ${USERNAME}@${REMOTE_HOST} "tail -f /cache/${USERNAME}/${FOLDER_NAME}/logs/train_${JOB_ID}.out"
+> ssh ${USERNAME}@${REMOTE_HOST} "tail -f ~/${FOLDER_NAME}/logs/train_${JOB_ID}.out"
 .PHONY: slurm-logs
 
 # Cancel a SLURM job (requires JOB_ID)
