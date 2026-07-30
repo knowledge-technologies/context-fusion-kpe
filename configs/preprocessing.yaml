@@ -12,7 +12,7 @@ segmentation:
     - "lemmatizer"
     - "attribute_ruler"
   batch_size: 100
-  n_process: 64
+  n_process: 32
 
 # Keyword matching configuration
 # match_mode options: "stem_equality" (recommended) or "stem_regex"
