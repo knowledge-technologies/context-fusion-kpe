@@ -215,6 +215,7 @@ def main() -> None:
             "scheme": scheme,
             "num_classes": num_classes,
             "match_mode": match_mode,
+            "tokenizer_name": tokenizer_cfg["model_name"],
             "limit": args.limit,
             "stats": {
                 "total_documents": total_documents,
