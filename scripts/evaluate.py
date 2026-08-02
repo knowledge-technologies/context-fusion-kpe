@@ -7,6 +7,7 @@ Usage:
     python scripts/evaluate.py --checkpoint path/to/model.pt
     python scripts/evaluate.py --checkpoint model.pt --dataset kp20k --split test
     python scripts/evaluate.py --checkpoint model.pt --from_config --device cuda
+    python scripts/evaluate.py --checkpoint model.pt --run-id worthy-firefly-11
 """
 
 import argparse
@@ -21,7 +22,7 @@ from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model
-from keyword_pecker.utils import get_logger, load_config
+from keyword_pecker.utils import get_logger, get_runs_root, load_config
 
 logger = get_logger("evaluate")
 
@@ -98,6 +99,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         help="Output JSON file path (auto-generated if not provided)",
+    )
+    parser.add_argument(
+        "--run-id",
+        help="W&B run name to save results into {run_dir}/evals/",
     )
     return parser.parse_args()
 
@@ -202,11 +207,14 @@ def main() -> None:
         dedup_strategy=config["dedup_strategy"],
     )
 
-    output_path = (
-        Path(args.output)
-        if args.output
-        else Path(generate_output_filename(args.dataset, args.split))
-    )
+    if args.output:
+        output_path = Path(args.output)
+    elif args.run_id:
+        evals_dir = get_runs_root() / args.run_id / "evals"
+        evals_dir.mkdir(parents=True, exist_ok=True)
+        output_path = evals_dir / generate_output_filename(args.dataset, args.split)
+    else:
+        output_path = Path(generate_output_filename(args.dataset, args.split))
 
     output_data = {
         "metadata": {

@@ -19,7 +19,7 @@ SERVER ?= kt-gpu2
 
 ifeq ($(SERVER),kt-gpu4)
   REMOTE_HOST = $(KT_GPU4_HOST)
-  REMOTE_DATA_DIR = ~/data/$(FOLDER_NAME)
+  REMOTE_DATA_DIR = /ceph/home/$(USERNAME)/data/$(FOLDER_NAME)
   REMOTE_PROJECT_DIR = /ceph/home/$(USERNAME)/$(FOLDER_NAME)
 else
   REMOTE_HOST = $(KT_GPU2_HOST)
@@ -73,9 +73,15 @@ attach-train:
 > ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t remote-train"
 .PHONY: attach-train
 
-# Launch a detached evaluation session inside the container on kt-gpu2.
-# Usage: make remote-evaluate EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cuda"
+# Launch a detached evaluation session inside the container.
+# KT-GPU2: tmux session. KT-GPU4: SLURM job.
+# Usage: make remote-evaluate [SERVER=kt-gpu4] [EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cuda"]
 remote-evaluate:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
+>      ${REMOTE_PROJECT_DIR}/slurm/evaluate.sbatch"
+else
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s remote-evaluate \
 >     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
@@ -85,6 +91,7 @@ remote-evaluate:
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
 >         env UV_PROJECT_ENVIRONMENT=/opt/venv \
 >         uv run /workspace/scripts/evaluate.py ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate.log'"
+endif
 .PHONY: remote-evaluate
 
 attach-evaluate:
