@@ -161,7 +161,11 @@ def main() -> None:
     args = parse_args()
     config = load_eval_config(args)
 
-    checkpoint_path = Path(args.checkpoint)
+    if args.run_id:
+        run_dir = get_runs_root() / args.run_id
+        checkpoint_path = run_dir / args.checkpoint
+    else:
+        checkpoint_path = Path(args.checkpoint)
     data_path = get_derived_path(args.dataset, args.split)
 
     validate_inputs(checkpoint_path, data_path, args.split)
