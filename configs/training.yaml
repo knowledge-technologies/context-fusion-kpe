@@ -1,8 +1,8 @@
 training:
   seed: 54321                        # random seed for reproducibility
   epochs: 20
-  outer_batch_size: 80              # sentences per gradient accumulation unit
-  inner_batch_size: 40               # sentences per forward pass
+  outer_batch_size: 100              # sentences per gradient accumulation unit
+  inner_batch_size: 50               # sentences per forward pass
   val_batch_size: 200                # batch size for validation
   base_lr: 2.0e-5                    # learning rate for base encoder parameters
   head_lr: 5.0e-5                    # learning rate for refinement head parameters
