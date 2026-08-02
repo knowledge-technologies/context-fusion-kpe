@@ -6,7 +6,7 @@ training:
   val_batch_size: 200                # batch size for validation
   base_lr: 2.0e-5                    # learning rate for base encoder parameters
   head_lr: 5.0e-5                    # learning rate for refinement head parameters
-  adam_eps: 1.0e-6                   # AdamW epsilon for numerical stability
+  adam_eps: 1.0e-8                   # AdamW epsilon for numerical stability
   scheme: "IOB"                      # labeling scheme: "binary" or "IOB"
   num_classes: 3                     # number of output classes (2 for binary, 3 for IOB)
   use_class_weights: true            # whether to apply class weights in loss (false = equal weighting, like legacy)
@@ -30,7 +30,7 @@ evaluation:
   # apostrophes should be kept. We keep legacy behavior for reproducible comparisons.
   disallowed_punctuation: "!#$%&'()*+,.:;<=>?@[\\]^_`{|}~"
   dedup_strategy: "stem"                  # "stem" (legacy) or "lowercase"
-  scoring_strategy: "unordered"          # "confidence" (model probabilities) or "unordered" (extraction order)
+  scoring_strategy: "confidence"          # "confidence" (model probabilities) or "unordered" (extraction order)
   score_method: "average"                  # "average", "max", "min", "geometric", (only applies when `scoring_strategy = 'confidence'`)
 
 wandb:
