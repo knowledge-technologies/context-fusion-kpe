@@ -11,9 +11,7 @@ Usage:
 
 import argparse
 import json
-import os
 from datetime import datetime, timezone
-from pathlib import Path
 
 import polars as pl
 import torch
@@ -22,24 +20,11 @@ from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
 from keyword_pecker.data import get_derived_path
 from keyword_pecker.models import KeyphraseModel
 from keyword_pecker.trainer import evaluate_model
-from keyword_pecker.utils import get_logger, load_config
+from keyword_pecker.utils import get_logger, get_runs_root, load_config
 
 logger = get_logger("evaluate_all")
 
 DEFAULT_DATASETS = ["kp20k", "kptimes", "inspec", "krapivin", "jptimes"]
-
-
-def get_runs_root() -> Path:
-    """Return the root directory for all experiment runs."""
-    runs_env = os.environ.get("EXPERIMENT_RUNS_FOLDER")
-    if runs_env:
-        return Path(runs_env)
-
-    dataset_env = os.environ.get("DATASET_FOLDER")
-    if dataset_env:
-        return Path(dataset_env) / "runs"
-
-    return Path(__file__).parent.parent / "runs"
 
 
 def parse_args() -> argparse.Namespace:
@@ -238,7 +223,10 @@ def main() -> None:
             return_per_doc=args.per_doc,
         )
 
-        output_path = evals_dir / f"{dataset}_{args.split}.json"
+        output_path = (
+            evals_dir
+            / f"{dataset}_{args.split}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+        )
         output_data = {
             "metadata": {
                 "checkpoint": str(checkpoint_path),
