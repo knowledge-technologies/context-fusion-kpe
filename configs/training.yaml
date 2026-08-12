@@ -23,7 +23,6 @@ training:
   early_stopping_check_every: 0      # check every n steps
 
 evaluation:
-  max_keyphrases: 10                     # max keyphrases per document
   filter_punctuation: true               # remove keyphrases containing disallowed punctuation
   # Copied from legacy TNT-KID eval code. Only dash (-) is allowed. Note: apostrophe
   # (') IS included (filtered), which differs from the TNT-KID paper that says
