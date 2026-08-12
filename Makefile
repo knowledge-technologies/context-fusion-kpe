@@ -105,6 +105,11 @@ remote-evaluate-all:
 ifndef RUN_ID
 > $(error RUN_ID is required. Usage: make remote-evaluate-all RUN_ID=worthy-firefly-11)
 endif
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},RUN_ID=${RUN_ID},EVAL_ARGS='${EVAL_ARGS}' \
+>      ${REMOTE_PROJECT_DIR}/slurm/evaluate_all.sbatch"
+else
 > ssh ${USERNAME}@${REMOTE_HOST} \
 >     "tmux new-session -d -s remote-eval-all \
 >     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
@@ -114,6 +119,7 @@ endif
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
 >         env UV_PROJECT_ENVIRONMENT=/opt/venv \
 >         uv run /workspace/scripts/evaluate_all.py --run-id ${RUN_ID} ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate_all.log'"
+endif
 .PHONY: remote-evaluate-all
 
 attach-evaluate-all:
