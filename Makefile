@@ -100,14 +100,10 @@ attach-evaluate:
 
 # Batch evaluation on multiple datasets.
 # Usage: make remote-evaluate-all RUN_ID=worthy-firefly-11 [EVAL_ARGS="--device cuda --datasets inspec,kp20k"]
-RUN_ID ?=
 remote-evaluate-all:
-ifndef RUN_ID
-> $(error RUN_ID is required. Usage: make remote-evaluate-all RUN_ID=worthy-firefly-11)
-endif
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},RUN_ID=${RUN_ID},EVAL_ARGS='${EVAL_ARGS}' \
+>     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
 >      ${REMOTE_PROJECT_DIR}/slurm/evaluate_all.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
@@ -118,7 +114,7 @@ else
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
 >         env UV_PROJECT_ENVIRONMENT=/opt/venv \
->         uv run /workspace/scripts/evaluate_all.py --run-id ${RUN_ID} ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate_all.log'"
+>         uv run /workspace/scripts/evaluate_all.py ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate_all.log'"
 endif
 .PHONY: remote-evaluate-all
 
