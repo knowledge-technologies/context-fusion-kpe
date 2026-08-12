@@ -115,6 +115,17 @@ def parse_args() -> argparse.Namespace:
         choices=["average", "max", "min", "geometric"],
         help="Score aggregation method (default: average)",
     )
+    parser.add_argument(
+        "--n-documents",
+        type=int,
+        default=15,
+        help="Number of documents to include in samples/per_doc (default: 15)",
+    )
+    parser.add_argument(
+        "--per-doc",
+        action="store_true",
+        help="Include per-document analysis with @5/@10 metrics and scores",
+    )
     return parser.parse_args()
 
 
@@ -223,6 +234,8 @@ def main() -> None:
             filter_punctuation=config["filter_punctuation"],
             disallowed_punctuation=config["disallowed_punctuation"],
             dedup_strategy=config["dedup_strategy"],
+            n_documents=args.n_documents,
+            return_per_doc=args.per_doc,
         )
 
         output_path = evals_dir / f"{dataset}_{args.split}.json"
@@ -234,9 +247,13 @@ def main() -> None:
                 "eval_config": {**config},
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
-            "metrics": {k: v for k, v in metrics.items() if k != "samples"},
+            "metrics": {
+                k: v for k, v in metrics.items() if k not in ("samples", "per_doc")
+            },
             "samples": metrics["samples"],
         }
+        if args.per_doc:
+            output_data["per_doc"] = metrics["per_doc"]
 
         output_path.write_text(json.dumps(output_data, indent=2))
         logger.info(f"  Loss: {metrics[f'{args.split}_loss']:.6f}")

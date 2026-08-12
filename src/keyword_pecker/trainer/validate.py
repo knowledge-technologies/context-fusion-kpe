@@ -50,6 +50,58 @@ def _normalize_keyphrases(keyphrases: list[list[str]]) -> list[list[str]]:
     ]
 
 
+def _build_sample(
+    doc_key: tuple[str, int],
+    gold_norm: list[str],
+    pred_with_scores: list[tuple[str, float]],
+) -> dict:
+    """Build a sample dict with normalized keywords and scores."""
+    return {
+        "doc_id": doc_key[0],
+        "doc_row": doc_key[1],
+        "gold_keywords": sorted(gold_norm),
+        "pred_keywords": [
+            {"keyword": kw, "score": round(score, 4)} for kw, score in pred_with_scores
+        ],
+    }
+
+
+def _compute_per_doc_metrics(
+    doc_key: tuple[str, int],
+    gold_norm: list[str],
+    pred_with_scores: list[tuple[str, float]],
+) -> dict:
+    """Compute @5 and @10 metrics for a single document with full prediction details."""
+    gold_set = set(gold_norm)
+    pred_keywords = [
+        {"keyword": kw, "score": round(score, 4), "matched": kw in gold_set}
+        for kw, score in pred_with_scores
+    ]
+
+    metrics = {}
+    for k in (5, 10):
+        top_k = {kw for kw, _ in pred_with_scores[:k]}
+        tp = len(top_k & gold_set)
+        fp = len(top_k - gold_set)
+        fn = len(gold_set - top_k)
+        p = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        r = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        f1 = (2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0.0
+        metrics[f"precision@{k}"] = p
+        metrics[f"recall@{k}"] = r
+        metrics[f"f1@{k}"] = f1
+
+    return {
+        "doc_id": doc_key[0],
+        "doc_row": doc_key[1],
+        "num_gold": len(gold_set),
+        "num_pred": len(pred_keywords),
+        **metrics,
+        "gold_keywords": sorted(gold_norm),
+        "pred_keywords": pred_keywords,
+    }
+
+
 def _compute_confusion_matrix(
     predictions: list[int], targets: list[int], num_classes: int = 3
 ) -> list[list[int]]:
@@ -214,6 +266,8 @@ def evaluate_model(
     global_step: int = 0,
     epoch: int = 0,
     sample_seed: int = 42,
+    n_documents: int | None = 15,
+    return_per_doc: bool = False,
     scoring_strategy: str = "confidence",
     score_method: str = "average",
     iob_threshold: float = 0.5,
@@ -221,7 +275,7 @@ def evaluate_model(
     filter_punctuation: bool = True,
     disallowed_punctuation: str = DEFAULT_DISALLOWED_PUNCTUATION,
     dedup_strategy: str = "stem",
-) -> dict[str, float | list[dict[str, str | int | list[str]]]]:
+) -> dict[str, float | list[dict[str, str | int | list[str | dict]]]]:
     """Run evaluation and compute loss + keyphrase metrics for any dataset split.
 
     This function runs the model in evaluation mode over the given dataset,
@@ -251,6 +305,10 @@ def evaluate_model(
         epoch: Current epoch number (for logging).
         sample_seed: Random seed for sampling documents (default: 42). Set to None
             for non-reproducible sampling.
+        n_documents: Maximum number of documents to include in samples/per_doc.
+            None means include all documents (default: 15).
+        return_per_doc: If True, include per-document analysis with scores and
+            @10 metrics in the returned dict under "per_doc" key.
         scoring_strategy: "confidence" for model probability scores, "unordered" for extraction order (default: "confidence").
         score_method: How to aggregate token-specific probabilities within the keyphrase ("average", "max", "min", "geometric").
         iob_threshold: Minimum confidence for B/I predictions in IOB scheme.
@@ -272,7 +330,9 @@ def evaluate_model(
             - num_docs_total, num_docs_removed, num_docs_evaluated: Document counts.
             - samples: List of dicts with random document samples for qualitative
               analysis. Each dict has keys: doc_id, doc_row, gold_keywords,
-              pred_keywords (keyword lists are sorted).
+              pred_keywords (list of dicts with "keyword" and "score" keys).
+            - per_doc: (only if return_per_doc=True) List of dicts with per-document
+              analysis including @10 metrics, scores, and match status.
     """
     if k_values is None:
         k_values = [5, 10, "N", "M"]
@@ -423,43 +483,34 @@ def evaluate_model(
     gold_lists_norm = _normalize_keyphrases(keyphrases=gold_lists)
     pred_lists_norm = _normalize_keyphrases(keyphrases=pred_lists)
 
-    _N_SAMPLES = 10
-    # Capture random samples for qualitative analysis
-    num_samples = min(15, len(doc_keys))
+    n_docs = min(n_documents, len(doc_keys)) if n_documents else len(doc_keys)
     rng = random.Random(sample_seed)
-    sample_indices = rng.sample(range(len(doc_keys)), num_samples)
+    sample_indices = rng.sample(range(len(doc_keys)), n_docs)
+
     samples = []
+    per_doc = []
     for idx in sample_indices:
         doc_key = doc_keys[idx]
-        samples.append(
-            {
-                "doc_id": doc_key[0],
-                "doc_row": doc_key[1],
-                "gold_keywords": sorted(gold_lists_norm[idx]),
-                "pred_keywords": pred_lists_norm[idx][:_N_SAMPLES],
-            }
-        )
+        pred_with_scores = doc_to_pred_ranked[doc_key]
+        samples.append(_build_sample(doc_key, gold_lists_norm[idx], pred_with_scores))
+        if return_per_doc:
+            per_doc.append(
+                _compute_per_doc_metrics(
+                    doc_key, gold_lists_norm[idx], pred_with_scores
+                )
+            )
 
-    # Free aggregation intermediates
-    del (
-        all_ranked_predictions,
-        doc_ids,
-        doc_rows,
-        doc_to_gold,
-        doc_to_pred_ranked,
-        gold_lists,
-        pred_lists,
-    )
+    del all_ranked_predictions, doc_ids, doc_rows
 
     # Compute @k metrics using external eval module (stemmed, macro-averaged)
     at_k_metrics = compute_metrics_at_k_martinc(
         gold_lists_norm, pred_lists_norm, k_values
     )
-    metrics: dict[str, float | list[dict[str, str | int | list[str]]]] = dict(
-        at_k_metrics
-    )
+    metrics: dict = dict(at_k_metrics)
     metrics[f"{split}_loss"] = val_loss
     metrics["samples"] = samples
+    if return_per_doc:
+        metrics["per_doc"] = per_doc
 
     # Log metrics to file
     if metrics_filename is not None:
@@ -495,7 +546,14 @@ def evaluate_model(
         samples_table = wandb.Table(
             columns=["doc_id", "doc_row", "gold_keywords", "pred_keywords"],
             data=[
-                [s["doc_id"], s["doc_row"], s["gold_keywords"], s["pred_keywords"]]
+                [
+                    s["doc_id"],
+                    s["doc_row"],
+                    s["gold_keywords"],
+                    ", ".join(
+                        f"{k['keyword']} ({k['score']:.2f})" for k in s["pred_keywords"]
+                    ),
+                ]
                 for s in metrics["samples"]
             ],
         )
