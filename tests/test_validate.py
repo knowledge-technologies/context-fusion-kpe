@@ -1,6 +1,8 @@
 from numpy.testing import assert_approx_equal
 
 from keyword_pecker.trainer.validate import (
+    _build_sample,
+    _compute_per_doc_metrics,
     compute_metrics_at_k,
     compute_metrics_at_k_martinc,
 )
@@ -260,3 +262,65 @@ def test_compute_confusion_matrix_perfect():
     cm = _compute_confusion_matrix(predictions, targets, num_classes=3)
 
     assert cm == [[2, 0, 0], [0, 2, 0], [0, 0, 1]]
+
+
+def test_build_sample_returns_correct_structure():
+    """Test that _build_sample returns the expected dict structure with scores."""
+    doc_key = ("doc_1", 42)
+    gold_norm = ["apple", "banana"]
+    pred_with_scores = [("apple", 0.95), ("cherry", 0.72), ("banana", 0.61)]
+
+    result = _build_sample(doc_key, gold_norm, pred_with_scores)
+
+    assert result["doc_id"] == "doc_1"
+    assert result["doc_row"] == 42
+    assert result["gold_keywords"] == ["apple", "banana"]
+    assert len(result["pred_keywords"]) == 3
+    assert result["pred_keywords"][0] == {"keyword": "apple", "score": 0.95}
+    assert result["pred_keywords"][1] == {"keyword": "cherry", "score": 0.72}
+    assert result["pred_keywords"][2] == {"keyword": "banana", "score": 0.61}
+
+
+def test_compute_per_doc_metrics_at5_at10():
+    """Test that _compute_per_doc_metrics computes @5 and @10 metrics correctly."""
+    doc_key = ("doc_1", 0)
+    gold_norm = ["car", "bike", "train"]
+    pred_with_scores = [
+        ("car", 0.95),
+        ("bike", 0.85),
+        ("plane", 0.70),
+        ("boat", 0.60),
+        ("train", 0.55),
+        ("bus", 0.40),
+    ]
+
+    result = _compute_per_doc_metrics(doc_key, gold_norm, pred_with_scores)
+
+    assert result["doc_id"] == "doc_1"
+    assert result["num_gold"] == 3
+    assert result["num_pred"] == 6
+
+    # @5: top5 = {car, bike, plane, boat, train}, matches = {car, bike, train}
+    # tp=3, fp=2, fn=0 -> P=3/5=0.6, R=3/3=1.0, F1=2*3/(2*3+2)=0.75
+    assert_approx_equal(result["precision@5"], 0.6)
+    assert result["recall@5"] == 1.0
+    assert_approx_equal(result["f1@5"], 0.75)
+
+    # @10: same 6 preds, all included
+    # tp=3, fp=3, fn=0 -> P=3/6=0.5, R=3/3=1.0, F1=2*3/(2*3+3)=0.667
+    assert_approx_equal(result["precision@10"], 0.5)
+    assert result["recall@10"] == 1.0
+    assert_approx_equal(result["f1@10"], 2 / 3)
+
+
+def test_compute_per_doc_metrics_matched_flags():
+    """Test that matched flags are correctly set in pred_keywords."""
+    doc_key = ("doc_1", 0)
+    gold_norm = ["apple", "banana"]
+    pred_with_scores = [("apple", 0.9), ("cherry", 0.8), ("banana", 0.7)]
+
+    result = _compute_per_doc_metrics(doc_key, gold_norm, pred_with_scores)
+
+    assert result["pred_keywords"][0]["matched"] is True
+    assert result["pred_keywords"][1]["matched"] is False
+    assert result["pred_keywords"][2]["matched"] is True
