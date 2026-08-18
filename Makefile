@@ -55,7 +55,7 @@ shell:
 remote-train:
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},TRAIN_ARGS='${TRAIN_ARGS}' \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},TRAIN_ARGS='${TRAIN_ARGS}' \
 >      ${REMOTE_PROJECT_DIR}/slurm/train.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
@@ -79,7 +79,7 @@ attach-train:
 remote-evaluate:
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
 >      ${REMOTE_PROJECT_DIR}/slurm/evaluate.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
@@ -103,7 +103,7 @@ attach-evaluate:
 remote-evaluate-all:
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
 >      ${REMOTE_PROJECT_DIR}/slurm/evaluate_all.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
@@ -201,7 +201,7 @@ OPT_ARGS ?=
 remote-preprocess-data:
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},DATASET=${DATASET},OPT_ARGS='${OPT_ARGS}' \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},DATASET=${DATASET},OPT_ARGS='${OPT_ARGS}' \
 >      ${REMOTE_PROJECT_DIR}/slurm/preprocess.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
@@ -219,6 +219,31 @@ endif
 attach-preprocess:
 > ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t preprocess-${DATASET}"
 .PHONY: attach-preprocess
+
+# Run split_validation.py on the remote server inside the Apptainer container (CPU-only, no --nv).
+# KT-GPU2: tmux session. KT-GPU4: SLURM job.
+# Usage: make remote-split-validation [SERVER=kt-gpu4] [DATASET=kptimes] [OPT_ARGS="--train-ratio 0.8 --seed 42"]
+remote-split-validation:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},DATASET=${DATASET},OPT_ARGS='${OPT_ARGS}' \
+>      ${REMOTE_PROJECT_DIR}/slurm/split_validation.sbatch"
+else
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "tmux new-session -d -s split-valid-${DATASET} \
+>     'apptainer exec --env-file ${REMOTE_PROJECT_DIR}/.env \
+>         --bind ${REMOTE_PROJECT_DIR}:/workspace \
+>         --bind ${REMOTE_DATA_DIR}:/workspace/data \
+>         ${REMOTE_PROJECT_DIR}/out/container.sif \
+>         env UV_PROJECT_ENVIRONMENT=/opt/venv \
+>         uv run /workspace/scripts/split_validation.py $(DATASET) ${OPT_ARGS}'"
+endif
+.PHONY: remote-split-validation
+
+# Attach to the running split-validation tmux session on the remote host to monitor progress
+attach-split-validation:
+> ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t split-valid-${DATASET}"
+.PHONY: attach-split-validation
 
 clean:
 > rm -rf out
