@@ -20,6 +20,7 @@ Usage:
 
 import argparse
 import json
+from pathlib import Path
 
 import polars as pl
 import torch
@@ -187,6 +188,18 @@ def parse_args() -> argparse.Namespace:
         default=0,
         help="Run validation every N optimizer steps for early stopping (0 = epoch-only, default: 0)",
     )
+    parser.add_argument(
+        "--train-data",
+        type=str,
+        default=None,
+        help="Path to training parquet file (overrides --dataset train split)",
+    )
+    parser.add_argument(
+        "--val-data",
+        type=str,
+        default=None,
+        help="Path to validation parquet file (overrides --dataset valid split)",
+    )
     return parser.parse_args()
 
 
@@ -284,8 +297,26 @@ def main() -> None:
     logger.info(f"Run directory: {run_dir}")
 
     # Load data and model (defer test_df until needed to reduce memory during training)
-    train_df = pl.read_parquet(get_derived_path(args.dataset, "train"))
-    val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
+    if args.train_data:
+        train_df = pl.read_parquet(Path(args.train_data))
+        logger.info(
+            f"--train-data provided, loading training data from: {args.train_data}"
+        )
+    else:
+        train_path = get_derived_path(args.dataset, "train")
+        logger.info(f"Loading trainin data from {train_path}")
+        train_df = pl.read_parquet(train_path)
+
+    if args.val_data:
+        val_df = pl.read_parquet(Path(args.val_data))
+        logger.info(
+            f"--val-data provided, loading validation data from: {args.val_data}"
+        )
+    else:
+        val_path = get_derived_path(args.dataset, "valid")
+        logger.info(f"Loading validation set from: {val_path}")
+        val_df = pl.read_parquet(get_derived_path(args.dataset, "valid"))
+
     model = KeyphraseModel(**model_config).to(device)
 
     # Compute class weights from training data (used for loss weighting)
