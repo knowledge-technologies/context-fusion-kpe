@@ -17,14 +17,13 @@ apptainer exec --nv --env-file ${PROJECT_DIR}/.env \
     --bind ${DATA_DIR}:/workspace/data \
     ${PROJECT_DIR}/out/container.sif \
     /opt/venv/bin/python /workspace/scripts/train.py \
-        --dataset kp20k \
-        --train-data data/kp20k/derived/valid_80.parquet \
-        --val-data data/kp20k/derived/valid_20.parquet \
+        --dataset ${DATASET} \
+        --train-data data/${DATASET}/derived/valid_80.parquet \
+        --val-data data/${DATASET}/derived/valid_20.parquet \
         --epochs 20 \
         --outer-batch-size 100 \
         --inner-batch-size 50 \
         --val-batch-size 200 \
-        --warmup-ratio 0.01 \
         --no-scheduler \
         --device cuda \
         --early-stopping-patience 5 \

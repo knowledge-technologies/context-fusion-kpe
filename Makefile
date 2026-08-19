@@ -74,11 +74,14 @@ attach-train:
 .PHONY: attach-train
 
 # Launch validation-set training on kt-gpu4 (SLURM only).
-# Usage: make remote-train-valset [SERVER=kt-gpu4]
+# Usage: make remote-train-valset SERVER=kt-gpu4 DATASET=kp20k
 remote-train-valset:
+ifndef DATASET
+> $(error DATASET is required. Usage: make remote-train-valset SERVER=kt-gpu4 DATASET=kp20k)
+endif
 ifeq ($(SERVER),kt-gpu4)
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},DATASET=${DATASET} \
 >      ${REMOTE_PROJECT_DIR}/slurm/train_valset.sbatch"
 else
 > $(error remote-train-valset is only supported on kt-gpu4)
