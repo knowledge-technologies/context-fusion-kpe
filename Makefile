@@ -73,6 +73,18 @@ attach-train:
 > ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t remote-train"
 .PHONY: attach-train
 
+# Launch validation-set training on kt-gpu4 (SLURM only).
+# Usage: make remote-train-valset [SERVER=kt-gpu4]
+remote-train-valset:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR} \
+>      ${REMOTE_PROJECT_DIR}/slurm/train_valset.sbatch"
+else
+> $(error remote-train-valset is only supported on kt-gpu4)
+endif
+.PHONY: remote-train-valset
+
 # Launch a detached evaluation session inside the container.
 # KT-GPU2: tmux session. KT-GPU4: SLURM job.
 # Usage: make remote-evaluate [SERVER=kt-gpu4] [EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cuda"]
