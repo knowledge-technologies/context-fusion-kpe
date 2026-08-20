@@ -16,10 +16,10 @@ apptainer exec --nv --env-file ${PROJECT_DIR}/.env \
     --bind ${PROJECT_DIR}:/workspace \
     --bind ${DATA_DIR}:/workspace/data \
     ${PROJECT_DIR}/out/container.sif \
-    /opt/venv/bin/python /workspace/scripts/train.py \
+    bash -c "/opt/venv/bin/python /workspace/scripts/train.py \
         --dataset ${DATASET} \
-        --train-data data/${DATASET}/derived/valid_80.parquet \
-        --val-data data/${DATASET}/derived/valid_20.parquet \
+        --train-data /workspace/data/${DATASET}/derived/valid_80.parquet \
+        --val-data /workspace/data/${DATASET}/derived/valid_20.parquet \
         --epochs 20 \
         --outer-batch-size 100 \
         --inner-batch-size 50 \
@@ -31,4 +31,4 @@ apptainer exec --nv --env-file ${PROJECT_DIR}/.env \
         --early-stopping-metric f1@10 \
         --early-stopping-mode max \
         --save-weights \
-        --wandb
+        --wandb"
