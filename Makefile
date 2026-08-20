@@ -88,6 +88,42 @@ else
 endif
 .PHONY: remote-train-valset
 
+# Quick smoke test: runs a minimal container job to verify apptainer works.
+# Usage: make remote-test [SERVER=kt-gpu4]
+remote-test:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR} \
+>      ${REMOTE_PROJECT_DIR}/slurm/test.sbatch"
+else
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "apptainer exec --env-file ${REMOTE_PROJECT_DIR}/.env \
+>         --bind ${REMOTE_PROJECT_DIR}:/workspace \
+>         ${REMOTE_PROJECT_DIR}/out/container.sif \
+>         /opt/venv/bin/python -c 'print(\"hello from container\")'"
+endif
+.PHONY: remote-test
+
+# Test data bind mount + bash -c path resolution (no GPU).
+# Usage: make remote-test-data [SERVER=kt-gpu4] [DATASET=kp20k]
+remote-test-data:
+ifndef DATASET
+> $(error DATASET is required. Usage: make remote-test-data SERVER=kt-gpu4 DATASET=kp20k)
+endif
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},DATASET=${DATASET} \
+>      ${REMOTE_PROJECT_DIR}/slurm/test_data.sbatch"
+else
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "apptainer exec --env-file ${REMOTE_PROJECT_DIR}/.env \
+>         --bind ${REMOTE_PROJECT_DIR}:/workspace \
+>         --bind ${REMOTE_DATA_DIR}:/workspace/data \
+>         ${REMOTE_PROJECT_DIR}/out/container.sif \
+>         /opt/venv/bin/python -c 'print(\"data bind test works\")'"
+endif
+.PHONY: remote-test-data
+
 # Launch a detached evaluation session inside the container.
 # KT-GPU2: tmux session. KT-GPU4: SLURM job.
 # Usage: make remote-evaluate [SERVER=kt-gpu4] [EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cuda"]
