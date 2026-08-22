@@ -1,9 +1,98 @@
-"""Data loading functions for young-haze analysis."""
+"""Data loading functions for keyword extraction analysis."""
 
 import json
 from pathlib import Path
 
 import polars as pl
+
+
+BENCHMARKS = ["kp20k", "kptimes", "inspec"]
+
+
+def load_run_test_row(run_dir: Path) -> dict:
+    """Load test metrics from a single run directory.
+
+    Returns dict with keys: benchmark, f1_5, f1_10
+    """
+    config_path = run_dir / "config.json"
+    with open(config_path) as f:
+        config = json.load(f)
+
+    benchmark = config.get("dataset", config.get("benchmark", "unknown"))
+
+    metrics_path = run_dir / "metrics.json"
+    with open(metrics_path) as f:
+        lines = f.readlines()
+    last_line = lines[-1].strip()
+    metrics = json.loads(last_line)
+
+    return {
+        "benchmark": benchmark,
+        "f1_5": metrics.get("test_f1@5"),
+        "f1_10": metrics.get("test_f1@10"),
+    }
+
+
+def load_seke_multi_benchmark(
+    seke_evals_path: Path,
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Load SEKE baseline metrics for multiple benchmarks from external eval JSON.
+
+    Returns DataFrame with columns: benchmark, f1_5, f1_10
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    with open(seke_evals_path) as f:
+        seke_data = json.load(f)
+
+    bm_section = seke_data.get("benchmarks", seke_data)
+
+    bm_lookup = {k.lower(): k for k in bm_section}
+
+    rows = []
+    for bm in benchmarks:
+        key = bm_lookup.get(bm.lower())
+        if key is None:
+            continue
+        bm_data = bm_section[key]
+        f1_5_entry = bm_data.get("F1@5")
+        f1_10_entry = bm_data.get("F1@10")
+        f1_5 = f1_5_entry["mean"] / 100 if f1_5_entry else None
+        f1_10 = f1_10_entry["mean"] / 100 if f1_10_entry else None
+        rows.append({"benchmark": bm, "f1_5": f1_5, "f1_10": f1_10})
+
+    return pl.DataFrame(rows)
+
+
+def load_run_test_row_from_evals(run_dir: Path) -> dict:
+    """Load test metrics from a run's evals directory.
+
+    Finds eval_*_test_*.json in run_dir/evals/, extracts f1@5 and f1@10.
+    Returns dict with keys: benchmark, f1_5, f1_10
+    """
+    config_path = run_dir / "config.json"
+    with open(config_path) as f:
+        config = json.load(f)
+
+    benchmark = config.get("dataset", config.get("benchmark", "unknown"))
+
+    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+    if not eval_files:
+        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+
+    eval_files.sort(reverse=True)
+    eval_path = eval_files[0]
+    with open(eval_path) as f:
+        eval_data = json.load(f)
+
+    metrics = eval_data.get("metrics", {})
+    return {
+        "benchmark": benchmark,
+        "f1_5": metrics.get("f1@5"),
+        "f1_10": metrics.get("f1@10"),
+    }
 
 
 def load_seke_row(seke_evals_path: Path) -> pl.DataFrame:
