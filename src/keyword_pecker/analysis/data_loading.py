@@ -266,3 +266,31 @@ def _classify_match_type(pred_kw: str, gold_kws: list[str], matched_flag: bool) 
         if pred_words & gold_words:
             return "partial"
     return "none"
+
+
+def load_all_benchmark_per_doc(run_dir: Path) -> dict[str, list[dict]]:
+    """Load per-doc data from all eval JSONs in a run's evals directory.
+
+    Scans run_dir/evals/ for eval_*_test_*.json files, extracts benchmark
+    name from filename, and returns {benchmark: per_doc_list, ...}.
+    When multiple evals exist for the same benchmark, picks the one with
+    the most per-doc entries.
+    """
+    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+    if not eval_files:
+        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+
+    result: dict[str, tuple[int, list[dict]]] = {}
+    for eval_path in eval_files:
+        parts = eval_path.stem.split("_")
+        benchmark = parts[1]
+
+        with open(eval_path) as f:
+            eval_data = json.load(f)
+
+        per_doc = eval_data.get("per_doc", [])
+        existing_len = len(result.get(benchmark, (0, []))[1])
+        if len(per_doc) > existing_len:
+            result[benchmark] = (len(per_doc), per_doc)
+
+    return {bm: data for bm, (_, data) in result.items()}
