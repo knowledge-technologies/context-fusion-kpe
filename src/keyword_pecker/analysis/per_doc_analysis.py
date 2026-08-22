@@ -94,8 +94,135 @@ def select_samples(
     return samples
 
 
+def build_wide_metrics_df(
+    training_set_results: dict[str, dict[str, dict[str, float | None]]],
+    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Build a wide-format DataFrame for grouped metrics table.
+
+    Args:
+        training_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        validation_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        benchmarks: List of benchmark names (default: kp20k, kptimes, krapivin)
+
+    Returns:
+        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10 columns.
+    """
+    from keyword_pecker.analysis.data_loading import BENCHMARKS
+
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    rows = []
+    for group, results in [
+        ("Validation Set FT", validation_set_results),
+        ("Training Set FT", training_set_results),
+    ]:
+        for model_name, bm_data in results.items():
+            row = {"model": model_name, "group": group}
+            for bm in benchmarks:
+                metrics = bm_data.get(bm, {})
+                row[f"{bm}_f1_5"] = metrics.get("f1_5")
+                row[f"{bm}_f1_10"] = metrics.get("f1_10")
+            rows.append(row)
+
+    return pl.DataFrame(rows)
+
+
 def make_comparison_df(
     seke_row: pl.DataFrame, young_haze_row: pl.DataFrame
 ) -> pl.DataFrame:
     """Concatenate SEKE and young-haze rows into comparison DataFrame."""
     return pl.concat([seke_row, young_haze_row])
+
+
+def _compute_benchmark_stats(
+    per_doc: list[dict],
+    stats: list[str],
+) -> dict[str, float]:
+    """Compute descriptive statistics for a single benchmark's per-doc data."""
+    import numpy as np
+
+    df = pl.DataFrame(per_doc)
+    result = {}
+    for stat in stats:
+        if stat == "gold_mean":
+            result[stat] = float(df["num_gold"].mean())
+        elif stat == "gold_median":
+            result[stat] = float(np.median(df["num_gold"]))
+        elif stat == "pred_mean":
+            result[stat] = float(df["num_pred"].mean())
+        elif stat == "pred_median":
+            result[stat] = float(np.median(df["num_pred"]))
+        elif stat == "precision_5":
+            result[stat] = float(df["precision@5"].mean())
+        elif stat == "recall_5":
+            result[stat] = float(df["recall@5"].mean())
+        elif stat == "precision_10":
+            result[stat] = float(df["precision@10"].mean())
+        elif stat == "recall_10":
+            result[stat] = float(df["recall@10"].mean())
+    return result
+
+
+def build_keyphrase_stats_table(
+    training_set_per_doc: dict[str, list[dict]] | None = None,
+    validation_set_per_doc: dict[str, list[dict]] | None = None,
+) -> pl.DataFrame:
+    """Build a long-format DataFrame of keyphrase count statistics.
+
+    Args:
+        training_set_per_doc: {benchmark: per_doc_list} from training set evals.
+        validation_set_per_doc: {benchmark: per_doc_list} from validation set evals.
+
+    Returns:
+        DataFrame with columns: group, benchmark, gold_mean, gold_median,
+        pred_mean, pred_median.
+    """
+    stats = ["gold_mean", "gold_median", "pred_mean", "pred_median"]
+    rows = []
+
+    for group, per_doc_dict in [
+        ("Training Set FT", training_set_per_doc),
+        ("Validation Set FT", validation_set_per_doc),
+    ]:
+        if per_doc_dict is None:
+            continue
+        for bm in sorted(per_doc_dict):
+            row = {"group": group, "benchmark": bm}
+            row.update(_compute_benchmark_stats(per_doc_dict[bm], stats))
+            rows.append(row)
+
+    return pl.DataFrame(rows)
+
+
+def build_performance_stats_table(
+    training_set_per_doc: dict[str, list[dict]] | None = None,
+    validation_set_per_doc: dict[str, list[dict]] | None = None,
+) -> pl.DataFrame:
+    """Build a long-format DataFrame of extraction performance statistics.
+
+    Args:
+        training_set_per_doc: {benchmark: per_doc_list} from training set evals.
+        validation_set_per_doc: {benchmark: per_doc_list} from validation set evals.
+
+    Returns:
+        DataFrame with columns: group, benchmark, precision_5, recall_5,
+        precision_10, recall_10.
+    """
+    stats = ["precision_5", "recall_5", "precision_10", "recall_10"]
+    rows = []
+
+    for group, per_doc_dict in [
+        ("Training Set FT", training_set_per_doc),
+        ("Validation Set FT", validation_set_per_doc),
+    ]:
+        if per_doc_dict is None:
+            continue
+        for bm in sorted(per_doc_dict):
+            row = {"group": group, "benchmark": bm}
+            row.update(_compute_benchmark_stats(per_doc_dict[bm], stats))
+            rows.append(row)
+
+    return pl.DataFrame(rows)
