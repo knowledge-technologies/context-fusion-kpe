@@ -163,7 +163,7 @@ def plot_training_dynamics(
             ax_f1.axvline(step, color="tab:red", linestyle=":", alpha=0.5, linewidth=1)
         ax_loss.axvline(step, color="tab:red", linestyle=":", alpha=0.5, linewidth=1)
 
-    ax_f1.legend()
+    ax_f1.legend(fontsize=12)
     dyn_fig.suptitle(
         "Training dynamics: ModernBERT (young-haze-50)",
         fontsize=16,
@@ -277,7 +277,7 @@ def plot_loss_f1_overview(
         else:
             ax_f1.axvline(step, color="tab:red", linestyle=":", alpha=0.5, linewidth=1)
 
-    ax_f1.legend()
+    ax_f1.legend(fontsize=12)
     fig.suptitle("Training Loss and F1 Score Over Training", fontsize=16)
     fig.tight_layout()
 
@@ -361,7 +361,7 @@ def plot_modernbert_dynamics(
                         step, color="tab:red", linestyle=":", alpha=0.5, linewidth=1.5
                     )
 
-    axes[0, 0].legend()
+    axes[0, 0].legend(fontsize=12)
     axes[1, 0].xaxis.set_major_formatter(FuncFormatter(_step_formatter))
     axes[0, 0].set_xlim(0, max_step)
 
