@@ -9,61 +9,92 @@ if TYPE_CHECKING:
     from great_tables import GT
 
 
+BENCHMARKS = ["kp20k", "kptimes", "inspec"]
+
+BENCHMARK_COLORS = {
+    "kp20k": "#E69F00",
+    "kptimes": "#56B4E9",
+    "inspec": "#009E73",
+}
+
+BENCHMARK_PALETTES = {
+    "kp20k": ["#FFF5E0", "#E69F00"],
+    "kptimes": ["#E8F4FD", "#56B4E9"],
+    "inspec": ["#E0F5F0", "#009E73"],
+}
+
+LATEX_COLOR_DEFINITIONS = "\n".join(
+    f"\\definecolor{{soft{name}}}{{HTML}}{{{hex_color[1:]}}}"
+    for name, hex_color in BENCHMARK_COLORS.items()
+)
+
+
 def make_metrics_table_gt(
-    comparison_df: pl.DataFrame,
+    wide_df: pl.DataFrame,
     fig_dir: Path | None = None,
     save: bool = False,
+    benchmarks: list[str] | None = None,
 ) -> "GT":
-    """Create a Great Tables formatted metrics comparison table."""
-    from great_tables import GT, loc, md, style
+    """Create a Great Tables formatted metrics comparison table with grouped rows."""
+    from great_tables import GT, loc, style
 
-    precision_cols = ["precision_5", "precision_10"]
-    recall_cols = ["recall_5", "recall_10"]
-    f1_cols = ["f1_5", "f1_10"]
-    metric_cols = precision_cols + recall_cols + f1_cols
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
 
-    min_metric = comparison_df.select(metric_cols).min_horizontal().min()
-    max_metric = comparison_df.select(metric_cols).max_horizontal().max()
+    metric_cols = []
+    for bm in benchmarks:
+        metric_cols.extend([f"{bm}_f1_5", f"{bm}_f1_10"])
+
+    wide_df = wide_df.with_columns(
+        pl.col("group").replace(
+            {
+                "Validation Set FT": "Validation Set Fine-tuning",
+                "Training Set FT": "Training Set Fine-tuning",
+            }
+        )
+    )
 
     table = (
-        GT(comparison_df)
+        GT(wide_df)
         .tab_header(
-            title="Evaluation scores on kp20k benchmark",
-            subtitle=md("Precision, Recall, and F1@5/@10 across two runs"),
+            title="Evaluation scores across benchmarks",
+            subtitle="F1@5 and F1@10 for Training Set FT and Validation Set FT",
         )
-        .tab_stub(rowname_col="run")
-        .cols_hide(columns=["n_epochs"])
+        .tab_stub(rowname_col="model", groupname_col="group")
         .cols_label(
-            precision_5="@5",
-            precision_10="@10",
-            recall_5="@5",
-            recall_10="@10",
-            f1_5="@5",
-            f1_10="@10",
+            **{f"{bm}_f1_5": "@5" for bm in benchmarks},
+            **{f"{bm}_f1_10": "@10" for bm in benchmarks},
         )
-        .tab_spanner(
-            label="Precision (%)",
-            columns=precision_cols,
+    )
+
+    for bm in benchmarks:
+        table = table.tab_spanner(
+            label=bm,
+            columns=[f"{bm}_f1_5", f"{bm}_f1_10"],
         )
-        .tab_spanner(
-            label="Recall (%)",
-            columns=recall_cols,
+
+    table = table.tab_style(style.text(weight="bold"), locations=loc.column_labels())
+    table = table.tab_style(style.text(style="italic"), locations=loc.row_groups())
+
+    for bm in benchmarks:
+        bm_cols = [f"{bm}_f1_5", f"{bm}_f1_10"]
+        bm_vals = [v for col in bm_cols for v in wide_df[col].drop_nulls().to_list()]
+        if bm_vals:
+            bm_min = min(bm_vals)
+            bm_max = max(bm_vals)
+        else:
+            bm_min = 0.0
+            bm_max = 1.0
+        table = table.data_color(
+            columns=bm_cols,
+            palette=BENCHMARK_PALETTES[bm],
+            domain=[bm_min, bm_max],
+            na_color="transparent",
         )
-        .tab_spanner(
-            label="F1 (%)",
-            columns=f1_cols,
-        )
-        .tab_style(style.text(weight="bold"), locations=loc.column_labels())
-        .data_color(
-            columns=metric_cols,
-            palette="Greens",
-            domain=[min_metric, max_metric],
-        )
-        .fmt_number(
-            columns=metric_cols,
-            decimals=1,
-            scale_by=100,
-        )
+
+    table = table.fmt(
+        columns=metric_cols,
+        fns=lambda x: "*" if x is None else f"{x * 100:.1f}",
     )
 
     if save and fig_dir is not None:
@@ -74,63 +105,86 @@ def make_metrics_table_gt(
 
 
 def make_metrics_table_tex(
-    comparison_df: pl.DataFrame,
+    wide_df: pl.DataFrame,
     fig_dir: Path | None = None,
     save: bool = False,
+    benchmarks: list[str] | None = None,
 ) -> str:
-    """Create a LaTeX table string for metrics comparison with cell coloring."""
-    color_enabled = True
+    """Create a LaTeX table string for grouped metrics with cell coloring."""
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
 
-    precision_cols = ["precision_5", "precision_10"]
-    recall_cols = ["recall_5", "recall_10"]
-    f1_cols = ["f1_5", "f1_10"]
-    metric_cols = precision_cols + recall_cols + f1_cols
+    metric_cols = []
+    for bm in benchmarks:
+        metric_cols.extend([f"{bm}_f1_5", f"{bm}_f1_10"])
 
-    all_vals = [
-        v for col in metric_cols for v in comparison_df[col].drop_nulls().to_list()
-    ]
-    global_min = min(all_vals) if all_vals else 0.0
-    global_max = max(all_vals) if all_vals else 1.0
+    bm_ranges = {}
+    for bm in benchmarks:
+        bm_cols = [f"{bm}_f1_5", f"{bm}_f1_10"]
+        bm_vals = [v for col in bm_cols for v in wide_df[col].drop_nulls().to_list()]
+        if bm_vals:
+            bm_ranges[bm] = (min(bm_vals), max(bm_vals))
+        else:
+            bm_ranges[bm] = (0.0, 1.0)
 
-    def cell_color(val):
+    def cell_color(val, bm):
         if val is None:
             return None
-        if global_max == global_min:
+        bm_min, bm_max = bm_ranges[bm]
+        if bm_max == bm_min:
             intensity = 50
         else:
-            intensity = ((val - global_min) / (global_max - global_min)) * 100
+            intensity = ((val - bm_min) / (bm_max - bm_min)) * 100
         intensity = max(15, min(100, intensity))
         return intensity
 
-    def fmt_val(val):
+    def fmt_val(val, bm):
         if val is None:
-            return "---"
+            return "*"
         pct = f"{val * 100:.1f}"
-        if color_enabled:
-            intensity = cell_color(val)
-            return f"\\cellcolor{{softgreen!{intensity:.0f}}}{pct}"
-        return pct
+        intensity = cell_color(val, bm)
+        color_name = f"soft{bm}"
+        return f"\\cellcolor{{{color_name}!{intensity:.0f}}}{pct}"
 
-    runs = comparison_df["run"].to_list()
+    n_bm_cols = len(benchmarks) * 2
 
-    rows = []
-    for i in range(len(runs)):
-        row_parts = [runs[i]]
-        for col in metric_cols:
-            val = comparison_df[col][i]
-            row_parts.append(fmt_val(val))
-        rows.append(" & ".join(row_parts))
+    header_spanners = []
+    header_subs = []
+    for bm in benchmarks:
+        header_spanners.append(f"\\multicolumn{{2}}{{c}}{{\\textbf{{{bm}}}}}")
+        header_subs.extend(["@5", "@10"])
 
     latex_lines = [
-        r"\begin{tabular}{lcccccc}",
+        LATEX_COLOR_DEFINITIONS,
+        r"\begin{tabular}{l" + "c" * n_bm_cols + "}",
         r"\toprule",
-        r"\textbf{Run} & \multicolumn{2}{c}{\textbf{Precision (\%)}} & \multicolumn{2}{c}{\textbf{Recall (\%)}} & \multicolumn{2}{c}{\textbf{F1 (\%)}} \\",
-        r"\cmidrule(lr){2-3} \cmidrule(lr){4-5} \cmidrule(lr){6-7}",
-        r"& \textbf{@5} & \textbf{@10} & \textbf{@5} & \textbf{@10} & \textbf{@5} & \textbf{@10} \\",
+        r"\textbf{Model/Benchmark} & " + " & ".join(header_spanners) + r" \\",
+        r"\cmidrule(lr){2-" + str(n_bm_cols + 1) + r"}",
+        r" & " + " & ".join(header_subs) + r" \\",
         r"\midrule",
     ]
-    for row in rows:
-        latex_lines.append(row + r" \\")
+
+    current_group = None
+    for row in wide_df.iter_rows(named=True):
+        group = row["group"]
+        model = row["model"]
+
+        if group != current_group:
+            if current_group is not None:
+                latex_lines.append(r"\midrule")
+            group_label = group.replace(" FT", " Fine-tuning")
+            latex_lines.append(
+                f"\\multicolumn{{{n_bm_cols + 1}}}{{l}}{{\\textit{{{group_label}}}}} \\\\"
+            )
+            latex_lines.append(r"\midrule")
+            current_group = group
+
+        vals = []
+        for bm in benchmarks:
+            vals.append(fmt_val(row.get(f"{bm}_f1_5"), bm))
+            vals.append(fmt_val(row.get(f"{bm}_f1_10"), bm))
+        latex_lines.append(f"{model} & {' & '.join(vals)} \\\\")
+
     latex_lines.append(r"\bottomrule")
     latex_lines.append(r"\end{tabular}")
 
