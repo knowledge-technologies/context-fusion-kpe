@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from keyword_pecker.analysis.tables import BENCHMARK_COLORS
+
 if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
@@ -378,3 +380,120 @@ def plot_modernbert_dynamics(
         )
 
     return dyn2_fig
+
+
+def plot_keyphrase_stats(
+    stats_df: pl.DataFrame,
+    fig_dir: Path | None = None,
+    save: bool = False,
+) -> "Figure":
+    """Create a bar chart comparing gold vs predicted keyphrase median counts."""
+    import matplotlib.pyplot as plt
+
+    val_benchmarks = [
+        b
+        for b in BENCHMARK_COLORS
+        if b
+        in stats_df.filter(pl.col("group") == "Validation Set FT")[
+            "benchmark"
+        ].to_list()
+    ]
+    train_benchmarks = [
+        b
+        for b in BENCHMARK_COLORS
+        if b
+        in stats_df.filter(pl.col("group") == "Training Set FT")["benchmark"].to_list()
+    ]
+
+    if not val_benchmarks and not train_benchmarks:
+        fig, ax = plt.subplots(figsize=(4, 2))
+        ax.text(
+            0.5,
+            0.5,
+            "No data available",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+        )
+        ax.axis("off")
+        return fig
+
+    fig, (ax_val, ax_train) = plt.subplots(
+        1,
+        2,
+        figsize=(5, 3.5),
+        gridspec_kw={"width_ratios": [3, 1], "wspace": 0.15},
+        sharey=True,
+        layout="constrained",
+    )
+
+    def _plot_facet(ax, benchmarks, group_name, is_val=False):
+        group_df = stats_df.filter(pl.col("group") == group_name)
+        if len(group_df) == 0:
+            ax.axis("off")
+            return
+
+        x = range(len(benchmarks))
+        width = 0.35
+
+        gold_vals = []
+        pred_vals = []
+        for bm in benchmarks:
+            row = group_df.filter(pl.col("benchmark") == bm)
+            if len(row) > 0:
+                gold_vals.append(row["gold_median"][0])
+                pred_vals.append(row["pred_median"][0])
+            else:
+                gold_vals.append(0)
+                pred_vals.append(0)
+
+        for i, bm in enumerate(benchmarks):
+            color = BENCHMARK_COLORS[bm]
+            ax.bar(
+                i - width / 2,
+                gold_vals[i],
+                width,
+                label="Gold" if i == 0 and is_val else "",
+                color=color,
+                edgecolor="black",
+                linewidth=0.5,
+            )
+            ax.bar(
+                i + width / 2,
+                pred_vals[i],
+                width,
+                label="Predicted" if i == 0 and is_val else "",
+                facecolor="white",
+                edgecolor=color,
+                linewidth=1.5,
+                hatch="///",
+            )
+
+        ax.set_xticks(x)
+        ax.set_xticklabels([bm.capitalize() for bm in benchmarks], fontsize=11)
+        ax.set_xlim(-0.5, len(benchmarks) - 0.5)
+        ax.set_title(f"{group_name.replace(' Set', ' set')}\nFine-tuning", fontsize=11)
+        ax.grid(True, axis="y", alpha=0.3)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.tick_params(axis="both", labelsize=10)
+
+        if is_val:
+            ax.legend(fontsize=9, loc="upper right")
+
+    if val_benchmarks:
+        _plot_facet(ax_val, val_benchmarks, "Validation Set FT", is_val=True)
+
+    if train_benchmarks:
+        _plot_facet(ax_train, train_benchmarks, "Training Set FT")
+
+    fig.supylabel("Median keyphrase count", fontsize=11)
+    fig.supxlabel("Benchmark", fontsize=11)
+
+    if save and fig_dir is not None:
+        print("Saving keyphrase_stats.png")
+        fig.savefig(fig_dir / "keyphrase_stats.png", dpi=200, bbox_inches="tight")
+        print("Saving keyphrase_stats.pdf")
+        fig.savefig(fig_dir / "keyphrase_stats.pdf", bbox_inches="tight")
+
+    return fig
