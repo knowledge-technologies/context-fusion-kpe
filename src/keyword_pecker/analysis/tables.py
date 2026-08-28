@@ -1,5 +1,7 @@
 """Table generation functions for metrics and sample displays."""
 
+import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -62,8 +64,8 @@ def make_metrics_table_gt(
         )
         .tab_stub(rowname_col="model", groupname_col="group")
         .cols_label(
-            **{f"{bm}_f1_5": "@5" for bm in benchmarks},
-            **{f"{bm}_f1_10": "@10" for bm in benchmarks},
+            **{f"{bm}_f1_5": "F1@5" for bm in benchmarks},
+            **{f"{bm}_f1_10": "F1@10" for bm in benchmarks},
         )
     )
 
@@ -94,7 +96,7 @@ def make_metrics_table_gt(
 
     table = table.fmt(
         columns=metric_cols,
-        fns=lambda x: "*" if x is None else f"{x * 100:.1f}",
+        fns=lambda x: "---" if x is None else f"{x * 100:.1f}",
     )
 
     if save and fig_dir is not None:
@@ -140,7 +142,7 @@ def make_metrics_table_tex(
 
     def fmt_val(val, bm):
         if val is None:
-            return "*"
+            return "---"
         pct = f"{val * 100:.1f}"
         intensity = cell_color(val, bm)
         color_name = f"soft{bm}"
@@ -160,7 +162,7 @@ def make_metrics_table_tex(
         r"\toprule",
         r"\textbf{Model/Benchmark} & " + " & ".join(header_spanners) + r" \\",
         r"\cmidrule(lr){2-" + str(n_bm_cols + 1) + r"}",
-        r" & " + " & ".join(header_subs) + r" \\",
+        r"F1 & " + " & ".join(header_subs) + r" \\",
         r"\midrule",
     ]
 
@@ -306,3 +308,238 @@ def make_samples_table_tex(
         (fig_dir / "samples_table.tex").write_text(samples_latex)
 
     return samples_latex
+
+
+def make_precision_recall_table_tex(
+    stats_df: pl.DataFrame,
+    fig_dir: Path | None = None,
+    save: bool = False,
+) -> str:
+    """Create a LaTeX table of extraction performance with grouped rows and cell coloring."""
+    benchmarks = [b for b in BENCHMARKS if b in stats_df["benchmark"].to_list()]
+
+    metric_rows = [
+        (r"Precision", "precision"),
+        (r"Recall", "recall"),
+    ]
+
+    bm_ranges = {}
+    for bm in benchmarks:
+        vals = []
+        for metric_prefix in ["precision", "recall"]:
+            for k in [5, 10]:
+                col = f"{metric_prefix}_{k}"
+                for group in ["Training Set FT", "Validation Set FT"]:
+                    row = stats_df.filter(
+                        pl.col("group") == group, pl.col("benchmark") == bm
+                    )
+                    if len(row) > 0:
+                        val = row[col][0]
+                        if val is not None:
+                            vals.append(val)
+        if vals:
+            bm_ranges[bm] = (min(vals), max(vals))
+        else:
+            bm_ranges[bm] = (0.0, 1.0)
+
+    def cell_color(val, bm):
+        if val is None:
+            return None
+        bm_min, bm_max = bm_ranges[bm]
+        if bm_max == bm_min:
+            intensity = 50
+        else:
+            intensity = ((val - bm_min) / (bm_max - bm_min)) * 100
+        intensity = max(15, min(100, intensity))
+        return intensity
+
+    def fmt_val(val, bm, metric_prefix):
+        if val is None:
+            return "---"
+        pct = f"{val * 100:.1f}"
+        intensity = cell_color(val, bm)
+        color_name = f"soft{bm}"
+        return f"\\cellcolor{{{color_name}!{intensity:.0f}}}{pct}"
+
+    n_data_cols = len(benchmarks) * 2
+
+    header_spanners = []
+    header_subs = []
+    for bm in benchmarks:
+        header_spanners.append(f"\\multicolumn{{2}}{{c}}{{\\textbf{{{bm}}}}}")
+        header_subs.extend(["@5", "@10"])
+
+    latex_lines = [
+        rf"\begin{{tabular}}{{l{'c' * n_data_cols}}}",
+        r"\toprule",
+        r"\textbf{Metric} & " + " & ".join(header_spanners) + r" \\",
+        r"\cmidrule(lr){2-" + str(n_data_cols + 1) + r"}",
+        r" & " + " & ".join(header_subs) + r" \\",
+        r"\midrule",
+    ]
+
+    group_labels = {
+        "Training Set FT": "Training Set Fine-tuning",
+        "Validation Set FT": "Validation Set Fine-tuning",
+    }
+
+    first_group = True
+    for group in ["Validation Set FT", "Training Set FT"]:
+        if group not in stats_df["group"].to_list():
+            continue
+
+        if not first_group:
+            latex_lines.append(r"\midrule")
+        first_group = False
+
+        label = group_labels.get(group, group)
+        latex_lines.append(
+            f"\\multicolumn{{{n_data_cols + 1}}}{{l}}{{\\textit{{{label}}}}} \\\\"
+        )
+        latex_lines.append(r"\midrule")
+
+        for display_label, metric_prefix in metric_rows:
+            vals = []
+            for bm in benchmarks:
+                for k in [5, 10]:
+                    col = f"{metric_prefix}_{k}"
+                    row = stats_df.filter(
+                        pl.col("group") == group, pl.col("benchmark") == bm
+                    )
+                    if len(row) > 0:
+                        val = row[col][0]
+                        vals.append(fmt_val(val, bm, metric_prefix))
+                    else:
+                        vals.append("---")
+            latex_lines.append(f"{display_label} & {' & '.join(vals)} \\\\")
+
+    latex_lines.extend(
+        [
+            r"\bottomrule",
+            r"\end{tabular}",
+        ]
+    )
+
+    latex_table = "\n".join(latex_lines)
+
+    if save and fig_dir is not None:
+        print("Saving precision_recall_table.tex")
+        (fig_dir / "precision_recall_table.tex").write_text(latex_table)
+
+    return latex_table
+
+
+def compute_dataset_stats(file_path: str | Path, vocab_sample: int = 1000) -> dict:
+    """Compute dataset statistics from a JSON Lines file.
+
+    Args:
+        file_path: Path to a JSON Lines dataset file.
+        vocab_sample: Number of documents to sample for vocabulary counting.
+
+    Returns:
+        Dict with keys: nr_documents, mean_abstract_words, max_abstract_words,
+        mean_keywords, vocab_size, words_per_keyword.
+    """
+    file_path = Path(file_path)
+    with open(file_path) as f:
+        docs = [json.loads(line) for line in f]
+
+    nr_documents = len(docs)
+
+    # Abstract word lengths
+    abs_word_lens = [len(d.get("abstract", "").split()) for d in docs]
+    mean_abstract_words = sum(abs_word_lens) / nr_documents
+    max_abstract_words = max(abs_word_lens)
+
+    # Keywords — handle both 'keywords' and 'keyword' field names
+    kw_field = "keywords" if "keywords" in docs[0] else "keyword"
+    kw_counts = []
+    for d in docs:
+        raw = d.get(kw_field, "")
+        kws = [k.strip() for k in raw.split(";") if k.strip()]
+        kw_counts.append(len(kws))
+    mean_keywords = sum(kw_counts) / nr_documents
+
+    # Vocabulary size from first vocab_sample docs
+    words = set()
+    for d in docs[:vocab_sample]:
+        text = (d.get("title", "") + " " + d.get("abstract", "")).lower()
+        words.update(re.findall(r"[a-z]+", text))
+    vocab_size = len(words)
+
+    # Words per keyword
+    words_per_keyword = mean_abstract_words / max(mean_keywords, 1)
+
+    return {
+        "nr_documents": nr_documents,
+        "mean_abstract_words": mean_abstract_words,
+        "max_abstract_words": max_abstract_words,
+        "mean_keywords": mean_keywords,
+        "vocab_size": vocab_size,
+        "words_per_keyword": words_per_keyword,
+    }
+
+
+def make_dataset_stats_tex(
+    stats: dict[str, dict],
+    fig_dir: Path | None = None,
+    save: bool = False,
+    benchmarks: list[str] | None = None,
+) -> str:
+    """Create a LaTeX table of dataset statistics.
+
+    Args:
+        stats: Dict mapping benchmark names to stats dicts from compute_dataset_stats.
+        fig_dir: Directory to save the output file.
+        save: Whether to write the table to disk.
+        benchmarks: Ordered list of benchmarks to include (defaults to BENCHMARKS).
+
+    Returns:
+        LaTeX table string.
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    stats = {bm: stats[bm] for bm in benchmarks if bm in stats}
+
+    row_definitions = [
+        ("Nr. Documents", "nr_documents", lambda v: f"{v:,}"),
+        ("Mean abstract length (words)", "mean_abstract_words", lambda v: f"{v:.1f}"),
+        ("Max abstract length (words)", "max_abstract_words", lambda v: f"{v:,}"),
+        ("Mean keywords/doc", "mean_keywords", lambda v: f"{v:.1f}"),
+        ("Vocabulary size (first 1k docs)", "vocab_size", lambda v: f"{v:,}"),
+        ("Words per keyword", "words_per_keyword", lambda v: f"{v:.1f}"),
+    ]
+
+    n_cols = len(stats)
+    header_cells = [f"\\textbf{{{bm}}}" for bm in stats]
+
+    latex_lines = [
+        rf"\begin{{tabular}}{{l{'c' * n_cols}}}",
+        r"\toprule",
+        r"\textbf{Statistic} & " + " & ".join(header_cells) + r" \\",
+        r"\midrule",
+    ]
+
+    latex_lines.append(r"Domain & " + " CS & news & CS" + r" \\")
+
+    for display_label, key, fmt_fn in row_definitions:
+        vals = []
+        for bm in stats:
+            vals.append(fmt_fn(stats[bm][key]))
+        latex_lines.append(f"{display_label} & {' & '.join(vals)} \\\\")
+
+    latex_lines.extend(
+        [
+            r"\bottomrule",
+            r"\end{tabular}",
+        ]
+    )
+
+    latex_table = "\n".join(latex_lines)
+
+    if save and fig_dir is not None:
+        print("Saving dataset_stats_table.tex")
+        (fig_dir / "dataset_stats_table.tex").write_text(latex_table)
+
+    return latex_table
