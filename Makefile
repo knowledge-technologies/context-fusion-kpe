@@ -12,6 +12,7 @@ endif
 # Configuration (set in .env)
 USERNAME ?=
 GPU_ID ?=
+SESSION_NAME ?= remote-evaluate
 FOLDER_NAME = keyword-pecker
 
 # Server selection: kt-gpu2 (default, tmux) or kt-gpu4 (slurm)
@@ -124,6 +125,24 @@ else
 endif
 .PHONY: remote-test-data
 
+# Quick GPU smoke test: runs a minimal container job with GPU access to verify CUDA works.
+# Usage: make remote-test-gpu [SERVER=kt-gpu4]
+remote-test-gpu:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR} \
+>      ${REMOTE_PROJECT_DIR}/slurm/test_gpu.sbatch"
+else
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
+>         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
+>         --bind ${REMOTE_PROJECT_DIR}:/workspace \
+>         --bind ${REMOTE_DATA_DIR}:/workspace/data \
+>         ${REMOTE_PROJECT_DIR}/out/container.sif \
+>         /opt/venv/bin/python -c 'import torch; print(f\"CUDA available: {torch.cuda.is_available()}\")'"
+endif
+.PHONY: remote-test-gpu
+
 # Launch a detached evaluation session inside the container.
 # KT-GPU2: tmux session. KT-GPU4: SLURM job.
 # Usage: make remote-evaluate [SERVER=kt-gpu4] [EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cuda"]
@@ -134,19 +153,32 @@ ifeq ($(SERVER),kt-gpu4)
 >      ${REMOTE_PROJECT_DIR}/slurm/evaluate.sbatch"
 else
 > ssh ${USERNAME}@${REMOTE_HOST} \
->     "tmux new-session -d -s remote-evaluate \
+>     "tmux new-session -d -s ${SESSION_NAME} \
 >     'apptainer exec --nv --env-file ${REMOTE_PROJECT_DIR}/.env \
 >         --env CUDA_VISIBLE_DEVICES=${GPU_ID} \
 >         --bind ${REMOTE_PROJECT_DIR}:/workspace \
 >         --bind ${REMOTE_DATA_DIR}:/workspace/data \
 >         ${REMOTE_PROJECT_DIR}/out/container.sif \
 >         env UV_PROJECT_ENVIRONMENT=/opt/venv \
->         uv run /workspace/scripts/evaluate.py ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate.log'"
+>         /opt/venv/bin/python /workspace/scripts/evaluate.py ${EVAL_ARGS} 2>&1 | tee ${REMOTE_DATA_DIR}/runs/evaluate.log'"
 endif
 .PHONY: remote-evaluate
 
+# Launch a detached CPU-only evaluation session inside the container.
+# KT-GPU4: SLURM job.
+# Usage: make remote-evaluate-cpu [SERVER=kt-gpu4] [EVAL_ARGS="--checkpoint path/to/model.pt --dataset kp20k --split test --device cpu"]
+remote-evaluate-cpu:
+ifeq ($(SERVER),kt-gpu4)
+> ssh ${USERNAME}@${REMOTE_HOST} \
+>     "sbatch --mail-user=${SLURM_EMAIL} --export=ALL,PROJECT_DIR=${REMOTE_PROJECT_DIR},DATA_DIR=${REMOTE_DATA_DIR},EVAL_ARGS='${EVAL_ARGS}' \
+>      ${REMOTE_PROJECT_DIR}/slurm/evaluate_cpu.sbatch"
+else
+> $(error remote-evaluate-cpu is only supported on kt-gpu4)
+endif
+.PHONY: remote-evaluate-cpu
+
 attach-evaluate:
-> ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t remote-evaluate"
+> ssh -t ${USERNAME}@${REMOTE_HOST} "tmux attach-session -t ${SESSION_NAME}"
 .PHONY: attach-evaluate
 
 # Batch evaluation on multiple datasets.
