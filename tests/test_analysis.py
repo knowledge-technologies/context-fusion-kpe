@@ -1,5 +1,9 @@
 """Tests for recently added analysis functions — numerical correctness and crash behavior."""
 
+import json
+import tempfile
+from pathlib import Path
+
 import polars as pl
 import pytest
 from numpy.testing import assert_approx_equal
@@ -10,6 +14,7 @@ from keyword_pecker.analysis.per_doc_analysis import (
     build_keyphrase_stats_table,
     build_performance_stats_table,
 )
+from keyword_pecker.analysis.tables import compute_dataset_stats
 
 
 def _make_per_doc(n: int = 5) -> list[dict]:
@@ -241,3 +246,122 @@ def test_assign_accuracy_tiers_uniform_values():
     tiers = result["accuracy_tier"].to_list()
     # q25 == q75 == 0.5, so f1 >= q75 → "high" for all
     assert all(t == "high" for t in tiers)
+
+
+# ---------------------------------------------------------------------------
+# 6. compute_dataset_stats — correct numerical output
+# ---------------------------------------------------------------------------
+
+
+def _write_jsonl(docs: list[dict]) -> Path:
+    """Write a list of dicts to a temporary JSON Lines file."""
+    tmp = Path(tempfile.mktemp(suffix=".json"))
+    with open(tmp, "w") as f:
+        for doc in docs:
+            f.write(json.dumps(doc) + "\n")
+    return tmp
+
+
+def test_compute_dataset_stats_basic():
+    """Verify all 6 metrics on a small synthetic dataset."""
+    docs = [
+        {
+            "title": "Alpha Beta",
+            "abstract": "one two three four five",
+            "keywords": "kw1;kw2;kw3",
+        },
+        {"title": "Gamma", "abstract": "six seven eight", "keywords": "kw4;kw5"},
+        {
+            "title": "Delta Epsilon",
+            "abstract": "nine ten eleven twelve",
+            "keywords": "kw6",
+        },
+    ]
+    path = _write_jsonl(docs)
+    try:
+        stats = compute_dataset_stats(path)
+
+        assert stats["nr_documents"] == 3
+
+        # Abstract word lengths: 5, 3, 4 → mean=4.0, max=5
+        assert stats["mean_abstract_words"] == pytest.approx(4.0)
+        assert stats["max_abstract_words"] == 5
+
+        # Keyword counts: 3, 2, 1 → mean=2.0
+        assert stats["mean_keywords"] == pytest.approx(2.0)
+
+        # Vocabulary: alpha, beta, one, two, three, four, five, gamma, six, seven,
+        #             eight, delta, epsilon, nine, ten, eleven, twelve → 17
+        assert stats["vocab_size"] == 17
+
+        # Words per keyword: 4.0 / 2.0 = 2.0
+        assert stats["words_per_keyword"] == pytest.approx(2.0)
+    finally:
+        path.unlink()
+
+
+def test_compute_dataset_stats_keyword_field():
+    """Verify 'keyword' (singular) field is handled like 'keywords'."""
+    docs = [
+        {"title": "T1", "abstract": "a b c", "keyword": "x;y"},
+        {"title": "T2", "abstract": "d e", "keyword": "z"},
+    ]
+    path = _write_jsonl(docs)
+    try:
+        stats = compute_dataset_stats(path)
+        assert stats["mean_keywords"] == pytest.approx(1.5)
+    finally:
+        path.unlink()
+
+
+def test_compute_dataset_stats_empty_keywords():
+    """Documents with no keywords should not crash."""
+    docs = [
+        {"title": "T1", "abstract": "a b c", "keywords": ""},
+        {"title": "T2", "abstract": "d e f", "keywords": "k1"},
+    ]
+    path = _write_jsonl(docs)
+    try:
+        stats = compute_dataset_stats(path)
+        assert stats["mean_keywords"] == pytest.approx(0.5)
+        # words_per_keyword should not divide by zero
+        assert stats["words_per_keyword"] > 0
+    finally:
+        path.unlink()
+
+
+def test_compute_dataset_stats_vocab_sample_limit():
+    """Vocabulary should only count first vocab_sample documents."""
+    words_a = ["alpha", "beta", "gamma", "delta", "epsilon"]
+    words_b = [
+        "zeta",
+        "eta",
+        "theta",
+        "iota",
+        "kappa",
+        "lambda",
+        "mu",
+        "nu",
+        "xi",
+        "omicron",
+        "pi",
+        "rho",
+        "sigma",
+        "tau",
+        "upsilon",
+    ]
+    all_words = words_a + words_b
+    docs = [{"title": "", "abstract": w, "keywords": "k"} for w in all_words]
+    path = _write_jsonl(docs)
+    try:
+        stats_full = compute_dataset_stats(path, vocab_sample=20)
+        stats_limited = compute_dataset_stats(path, vocab_sample=5)
+
+        assert stats_full["nr_documents"] == 20
+        assert stats_limited["nr_documents"] == 20
+
+        # Limited vocab should be smaller (5 unique words vs 20)
+        assert stats_limited["vocab_size"] == 5
+        assert stats_full["vocab_size"] == 20
+    finally:
+        path.unlink()
