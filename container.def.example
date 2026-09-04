@@ -1,0 +1,52 @@
+Bootstrap: docker
+From: python:3.13
+
+%post
+
+    export https_proxy="" # fill these values
+    export http_proxy=""
+    export no_proxy=""
+
+    # Install uv
+    curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
+
+    # Make uv available in this %post shell
+    export PATH="/usr/local/bin:$PATH"
+
+    # Install all dependencies (core + wandb tracking extra) into /opt/venv.
+    # keyword-pecker itself is not installed here; it is provided at runtime
+    # via the /workspace bind mount + PYTHONPATH=/workspace/src.
+    uv venv --seed /opt/venv
+    uv pip install --python /opt/venv \
+        "nltk>=3.9.2" \
+        "numpy>=2.4.2" \
+        "pandas>=3.0.0" \
+        "polars>=1.38.1" \
+        "python-dotenv>=1.2.1" \
+        "pyyaml>=6.0.3" \
+        "regex>=2026.1.15" \
+        "spacy>=3.8.11" \
+        "sentencepiece>=0.2.1" \
+        "torch>=2.10.0" \
+        "tqdm>=4.67.3" \
+        "transformers>=5.1.0" \
+        "wandb>=0.19"
+
+    # Download spaCy English model (uses spaCy's own CDN, not GitHub releases)
+    /opt/venv/bin/python -m spacy download en_core_web_sm
+
+    # download the needed punctuation functionality for NLTK
+    /opt/venv/bin/python -m nltk.downloader punkt_tab
+
+%environment
+    export PATH="/opt/venv/bin:/root/.local/bin:$PATH"
+    # /workspace/src is the bind-mounted project source (--bind ~/<dir>:/workspace)
+    export NLTK_DATA="/root/nltk_data"
+    export PYTHONPATH="/workspace/src:$PYTHONPATH"
+
+    export https_proxy="" # configure these proxy settings
+    export http_proxy=""
+    export no_proxy=""
+
+%runscript
+    exec "$@"
