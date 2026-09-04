@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+.env
+notebooks/
+wandb/
+out/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
