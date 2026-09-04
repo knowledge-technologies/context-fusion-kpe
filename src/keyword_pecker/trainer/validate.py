@@ -54,9 +54,10 @@ def _build_sample(
     doc_key: tuple[str, int],
     gold_norm: list[str],
     pred_with_scores: list[tuple[str, float]],
+    unmatched_norm: list[str] | None = None,
 ) -> dict:
     """Build a sample dict with normalized keywords and scores."""
-    return {
+    result = {
         "doc_id": doc_key[0],
         "doc_row": doc_key[1],
         "gold_keywords": sorted(gold_norm),
@@ -64,12 +65,16 @@ def _build_sample(
             {"keyword": kw, "score": round(score, 4)} for kw, score in pred_with_scores
         ],
     }
+    if unmatched_norm is not None:
+        result["unmatched_keywords"] = sorted(unmatched_norm)
+    return result
 
 
 def _compute_per_doc_metrics(
     doc_key: tuple[str, int],
     gold_norm: list[str],
     pred_with_scores: list[tuple[str, float]],
+    unmatched_norm: list[str] | None = None,
 ) -> dict:
     """Compute @5 and @10 metrics for a single document with full prediction details."""
     gold_set = set(gold_norm)
@@ -91,7 +96,7 @@ def _compute_per_doc_metrics(
         metrics[f"recall@{k}"] = r
         metrics[f"f1@{k}"] = f1
 
-    return {
+    result = {
         "doc_id": doc_key[0],
         "doc_row": doc_key[1],
         "num_gold": len(gold_set),
@@ -100,6 +105,9 @@ def _compute_per_doc_metrics(
         "gold_keywords": sorted(gold_norm),
         "pred_keywords": pred_keywords,
     }
+    if unmatched_norm is not None:
+        result["unmatched_keywords"] = sorted(unmatched_norm)
+    return result
 
 
 def _compute_confusion_matrix(
@@ -383,13 +391,20 @@ def evaluate_model(
     # Compute gold keywords per document from sent_keywords union.
     # This matches legacy kw_in_paper: the union of all sentence-level
     # keyword matches across the document.
+    # Also track original gold keywords to identify unmatched phrases.
     gold_agg = val_df.group_by(["doc_id", "doc_row"]).agg(
-        pl.col("sent_keywords").flatten().unique().alias("keywords_in_doc")
+        pl.col("keywords").first().alias("all_gold_keywords"),
+        pl.col("sent_keywords").flatten().unique().alias("keywords_in_doc"),
     )
-    doc_to_gold: dict[tuple[str, int], list[str]] = {
-        (row["doc_id"], row["doc_row"]): row["keywords_in_doc"]
-        for row in gold_agg.iter_rows(named=True)
-    }
+    doc_to_gold: dict[tuple[str, int], list[str]] = {}
+    doc_to_unmatched: dict[tuple[str, int], list[str]] = {}
+    for row in gold_agg.iter_rows(named=True):
+        key = (row["doc_id"], row["doc_row"])
+        matched = row["keywords_in_doc"]
+        all_gold = row["all_gold_keywords"]
+        doc_to_gold[key] = matched
+        matched_set = set(matched)
+        doc_to_unmatched[key] = [kw for kw in all_gold if kw not in matched_set]
 
     # Collect token-level predictions/targets for confusion matrix (IOB only)
     cm_preds: list[int] = []
@@ -492,11 +507,17 @@ def evaluate_model(
     for idx in sample_indices:
         doc_key = doc_keys[idx]
         pred_with_scores = doc_to_pred_ranked[doc_key]
-        samples.append(_build_sample(doc_key, gold_lists_norm[idx], pred_with_scores))
+        unmatched = doc_to_unmatched.get(doc_key, [])
+        unmatched_norm = _normalize_keyphrases([unmatched])[0]
+        samples.append(
+            _build_sample(
+                doc_key, gold_lists_norm[idx], pred_with_scores, unmatched_norm
+            )
+        )
         if return_per_doc:
             per_doc.append(
                 _compute_per_doc_metrics(
-                    doc_key, gold_lists_norm[idx], pred_with_scores
+                    doc_key, gold_lists_norm[idx], pred_with_scores, unmatched_norm
                 )
             )
 
