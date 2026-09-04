@@ -94,7 +94,10 @@ Prerequisites: `prepare_data.py` must have been run, `DATASET_FOLDER` set in `.e
 
 ```bash
 uv run scripts/evaluate.py --checkpoint path/to/model.pt --dataset kp20k --split test
+uv run scripts/evaluate.py --run-id <run-name> --checkpoint model_best.pt --dataset kp20k --split test --device cuda --n-documents 100 --per-doc
 ```
+
+When `--run-id` is passed, the checkpoint is resolved relative to the runs root (`$EXPERIMENT_RUNS_FOLDER/<run-id>/`, or `$DATASET_FOLDER/runs/<run-id>/` if not set) and results are saved to `{run_dir}/evals/`.
 
 ## Makefile
 
