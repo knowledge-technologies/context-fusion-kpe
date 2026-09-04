@@ -13,6 +13,60 @@ if TYPE_CHECKING:
 
 BENCHMARKS = ["kp20k", "kptimes", "inspec"]
 
+MODEL_NAME_MAP = {
+    "TextRank": "TextRank (unsupervised)",
+    "TNT-KID": "TNT-KID (supervised)",
+    "Gemini1.5-Flash-mini-8B": "Gemini1.5-Flash-mini-8B (LLM)",
+}
+
+
+def load_external_benchmarks(
+    path: Path | str,
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Load external benchmark metrics from a JSON file.
+
+    Args:
+        path: Path to the benchmarks JSON file.
+        benchmarks: List of benchmark names to include (defaults to BENCHMARKS).
+
+    Returns:
+        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10.
+    """
+    from keyword_pecker.analysis.data_loading import BENCHMARKS
+
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    with open(path) as f:
+        data = json.load(f)
+
+    model_lookup = {k.lower(): v for k, v in data.items()}
+
+    rows = []
+    for model_key, model_name in MODEL_NAME_MAP.items():
+        model_data = model_lookup.get(model_key.lower())
+        if model_data is None:
+            continue
+        row = {"model": model_name, "group": "Published Baselines"}
+        bm_section = model_data.get("benchmarks", {})
+        bm_section_lookup = {k.lower(): k for k in bm_section}
+        for bm in benchmarks:
+            bm_key = bm_section_lookup.get(bm.lower())
+            if bm_key is None:
+                row[f"{bm}_f1_5"] = None
+                row[f"{bm}_f1_10"] = None
+                continue
+            bm_vals = bm_section[bm_key]
+            f1_5 = bm_vals.get("F1@5")
+            f1_10 = bm_vals.get("F1@10")
+            row[f"{bm}_f1_5"] = f1_5["mean"] / 100 if f1_5 else None
+            row[f"{bm}_f1_10"] = f1_10["mean"] / 100 if f1_10 else None
+        rows.append(row)
+
+    return pl.DataFrame(rows)
+
+
 BENCHMARK_COLORS = {
     "kp20k": "#E69F00",
     "kptimes": "#56B4E9",
@@ -36,12 +90,16 @@ def make_metrics_table_gt(
     fig_dir: Path | None = None,
     save: bool = False,
     benchmarks: list[str] | None = None,
+    external_rows: pl.DataFrame | None = None,
 ) -> "GT":
     """Create a Great Tables formatted metrics comparison table with grouped rows."""
     from great_tables import GT, loc, style
 
     if benchmarks is None:
         benchmarks = BENCHMARKS
+
+    if external_rows is not None:
+        wide_df = pl.concat([external_rows, wide_df])
 
     metric_cols = []
     for bm in benchmarks:
@@ -77,6 +135,10 @@ def make_metrics_table_gt(
 
     table = table.tab_style(style.text(weight="bold"), locations=loc.column_labels())
     table = table.tab_style(style.text(style="italic"), locations=loc.row_groups())
+    table = table.tab_style(
+        style.text(weight="bold"),
+        locations=loc.body(columns="model", rows=pl.col("model") == "Ours"),
+    )
 
     for bm in benchmarks:
         bm_cols = [f"{bm}_f1_5", f"{bm}_f1_10"]
@@ -111,10 +173,14 @@ def make_metrics_table_tex(
     fig_dir: Path | None = None,
     save: bool = False,
     benchmarks: list[str] | None = None,
+    external_rows: pl.DataFrame | None = None,
 ) -> str:
     """Create a LaTeX table string for grouped metrics with cell coloring."""
     if benchmarks is None:
         benchmarks = BENCHMARKS
+
+    if external_rows is not None:
+        wide_df = pl.concat([external_rows, wide_df])
 
     metric_cols = []
     for bm in benchmarks:
@@ -185,7 +251,8 @@ def make_metrics_table_tex(
         for bm in benchmarks:
             vals.append(fmt_val(row.get(f"{bm}_f1_5"), bm))
             vals.append(fmt_val(row.get(f"{bm}_f1_10"), bm))
-        latex_lines.append(f"{model} & {' & '.join(vals)} \\\\")
+        label = f"\\textbf{{{model}}}" if model == "Ours" else model
+        latex_lines.append(f"{label} & {' & '.join(vals)} \\\\")
 
     latex_lines.append(r"\bottomrule")
     latex_lines.append(r"\end{tabular}")

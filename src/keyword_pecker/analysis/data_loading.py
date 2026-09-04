@@ -142,7 +142,7 @@ def load_young_haze_row(young_haze_dir: Path) -> pl.DataFrame:
     return pl.DataFrame(
         [
             {
-                "run": "Ours (ModernBERT)",
+                "run": "Ours",
                 "precision_5": m["precision@5"],
                 "precision_10": m["precision@10"],
                 "recall_5": m["recall@5"],
