@@ -496,54 +496,91 @@ def make_precision_recall_table_tex(
     return latex_table
 
 
-def compute_dataset_stats(file_path: str | Path, vocab_sample: int = 1000) -> dict:
-    """Compute dataset statistics from a JSON Lines file.
+def compute_dataset_stats(
+    json_path: str | Path,
+    parquet_path: str | Path,
+    vocab_sample: int = 1000,
+) -> dict:
+    """Compute dataset statistics from JSON Lines and derived Parquet files.
 
     Args:
-        file_path: Path to a JSON Lines dataset file.
+        json_path: Path to raw JSON Lines dataset file (for abstract/vocab stats).
+        parquet_path: Path to derived Parquet file (for keyword stats).
         vocab_sample: Number of documents to sample for vocabulary counting.
 
     Returns:
         Dict with keys: nr_documents, mean_abstract_words, max_abstract_words,
-        mean_keywords, vocab_size, words_per_keyword.
+        mean_keywords_all, mean_keywords_present, vocab_size,
+        words_per_keyword_all, words_per_keyword_present.
     """
-    file_path = Path(file_path)
-    with open(file_path) as f:
+    json_path = Path(json_path)
+    parquet_path = Path(parquet_path)
+
+    # --- From JSON: document count, abstract stats, vocabulary ---
+    with open(json_path) as f:
         docs = [json.loads(line) for line in f]
 
     nr_documents = len(docs)
 
-    # Abstract word lengths
     abs_word_lens = [len(d.get("abstract", "").split()) for d in docs]
     mean_abstract_words = sum(abs_word_lens) / nr_documents
     max_abstract_words = max(abs_word_lens)
 
-    # Keywords — handle both 'keywords' and 'keyword' field names
-    kw_field = "keywords" if "keywords" in docs[0] else "keyword"
-    kw_counts = []
-    for d in docs:
-        raw = d.get(kw_field, "")
-        kws = [k.strip() for k in raw.split(";") if k.strip()]
-        kw_counts.append(len(kws))
-    mean_keywords = sum(kw_counts) / nr_documents
-
-    # Vocabulary size from first vocab_sample docs
     words = set()
     for d in docs[:vocab_sample]:
         text = (d.get("title", "") + " " + d.get("abstract", "")).lower()
         words.update(re.findall(r"[a-z]+", text))
     vocab_size = len(words)
 
-    # Words per keyword
-    words_per_keyword = mean_abstract_words / max(mean_keywords, 1)
+    # --- From Parquet: keyword stats (all vs present) ---
+    pq = pl.read_parquet(parquet_path)
+
+    # Group by document to get per-document keyword lists
+    doc_groups = pq.group_by(["doc_id", "doc_row"]).agg(
+        pl.col("keywords").first().alias("keywords"),
+        pl.col("sent_keywords")
+        .list.explode(keep_nulls=False, empty_as_null=False)
+        .unique()
+        .alias("present_keywords"),
+    )
+
+    # Mean keywords (all)
+    all_kw_counts = doc_groups.with_columns(
+        pl.col("keywords").list.len().alias("kw_count")
+    )
+    mean_keywords_all = all_kw_counts["kw_count"].mean()
+
+    # Mean keywords (present in text)
+    present_kw_counts = doc_groups.with_columns(
+        pl.col("present_keywords").list.len().alias("present_kw_count")
+    )
+    mean_keywords_present = present_kw_counts["present_kw_count"].mean()
+
+    # Words per keyword (all)
+    all_kws_flat = all_kw_counts.select(
+        pl.col("keywords").list.explode(keep_nulls=False, empty_as_null=False)
+    ).to_series()
+    all_kw_word_counts = [len(kw.split()) for kw in all_kws_flat if kw]
+    words_per_keyword_all = sum(all_kw_word_counts) / max(len(all_kw_word_counts), 1)
+
+    # Words per keyword (present)
+    present_kws_flat = present_kw_counts.select(
+        pl.col("present_keywords").list.explode(keep_nulls=False, empty_as_null=False)
+    ).to_series()
+    present_kw_word_counts = [len(kw.split()) for kw in present_kws_flat if kw]
+    words_per_keyword_present = sum(present_kw_word_counts) / max(
+        len(present_kw_word_counts), 1
+    )
 
     return {
         "nr_documents": nr_documents,
         "mean_abstract_words": mean_abstract_words,
         "max_abstract_words": max_abstract_words,
-        "mean_keywords": mean_keywords,
+        "mean_keywords_all": mean_keywords_all,
+        "mean_keywords_present": mean_keywords_present,
         "vocab_size": vocab_size,
-        "words_per_keyword": words_per_keyword,
+        "words_per_keyword_all": words_per_keyword_all,
+        "words_per_keyword_present": words_per_keyword_present,
     }
 
 
@@ -573,9 +610,25 @@ def make_dataset_stats_tex(
         ("Nr. Documents", "nr_documents", lambda v: f"{v:,}"),
         ("Mean abstract length (words)", "mean_abstract_words", lambda v: f"{v:.1f}"),
         ("Max abstract length (words)", "max_abstract_words", lambda v: f"{v:,}"),
-        ("Mean keywords/doc", "mean_keywords", lambda v: f"{v:.1f}"),
+        (
+            "Mean keyphrases/doc (all/in doc)",
+            ("mean_keywords_all", "mean_keywords_present"),
+            lambda v_all, v_present: (
+                f"{v_all:.1f} / {v_present:.1f}"
+                if v_present is not None
+                else f"{v_all:.1f}"
+            ),
+        ),
         ("Vocabulary size (first 1k docs)", "vocab_size", lambda v: f"{v:,}"),
-        ("Words per keyword", "words_per_keyword", lambda v: f"{v:.1f}"),
+        (
+            "Words per keyphrase (all/in doc)",
+            ("words_per_keyword_all", "words_per_keyword_present"),
+            lambda v_all, v_present: (
+                f"{v_all:.1f} / {v_present:.1f}"
+                if v_present is not None
+                else f"{v_all:.1f}"
+            ),
+        ),
     ]
 
     n_cols = len(stats)
@@ -590,10 +643,15 @@ def make_dataset_stats_tex(
 
     latex_lines.append(r"Domain & " + " CS & news & CS" + r" \\")
 
-    for display_label, key, fmt_fn in row_definitions:
+    for display_label, key_or_keys, fmt_fn in row_definitions:
         vals = []
         for bm in stats:
-            vals.append(fmt_fn(stats[bm][key]))
+            if isinstance(key_or_keys, tuple):
+                vals.append(
+                    fmt_fn(stats[bm][key_or_keys[0]], stats[bm][key_or_keys[1]])
+                )
+            else:
+                vals.append(fmt_fn(stats[bm][key_or_keys]))
         latex_lines.append(f"{display_label} & {' & '.join(vals)} \\\\")
 
     latex_lines.extend(

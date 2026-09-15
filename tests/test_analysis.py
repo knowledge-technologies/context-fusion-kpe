@@ -342,8 +342,38 @@ def _write_jsonl(docs: list[dict]) -> Path:
     return tmp
 
 
+def _write_parquet(docs: list[dict]) -> Path:
+    """Write a list of document dicts to a temporary Parquet file with sentence-level rows."""
+    tmp = Path(tempfile.mktemp(suffix=".parquet"))
+    rows = []
+    for i, doc in enumerate(docs):
+        kws = doc.get("keywords", "")
+        if isinstance(kws, str):
+            kw_list = [k.strip() for k in kws.split(";") if k.strip()]
+        else:
+            kw_list = kws
+        # Simulate one sentence per doc with keywords present
+        rows.append(
+            {
+                "doc_id": f"doc_{i}",
+                "doc_row": i,
+                "sent_num": 0,
+                "sent_txt": doc.get("abstract", ""),
+                "keywords": kw_list,
+                "sent_keywords": kw_list,  # all keywords present in this simplified case
+                "token_ids": [1, 2, 3],
+                "attention_mask": [1, 1, 1],
+                "keyword_mask": [0, 0, 0],
+                "word_ids": [0, 1, 2],
+                "word_list": doc.get("abstract", "").split(),
+            }
+        )
+    pl.DataFrame(rows).write_parquet(tmp)
+    return tmp
+
+
 def test_compute_dataset_stats_basic():
-    """Verify all 6 metrics on a small synthetic dataset."""
+    """Verify all metrics on a small synthetic dataset."""
     docs = [
         {
             "title": "Alpha Beta",
@@ -357,9 +387,10 @@ def test_compute_dataset_stats_basic():
             "keywords": "kw6",
         },
     ]
-    path = _write_jsonl(docs)
+    json_path = _write_jsonl(docs)
+    parquet_path = _write_parquet(docs)
     try:
-        stats = compute_dataset_stats(path)
+        stats = compute_dataset_stats(json_path, parquet_path)
 
         assert stats["nr_documents"] == 3
 
@@ -367,31 +398,37 @@ def test_compute_dataset_stats_basic():
         assert stats["mean_abstract_words"] == pytest.approx(4.0)
         assert stats["max_abstract_words"] == 5
 
-        # Keyword counts: 3, 2, 1 → mean=2.0
-        assert stats["mean_keywords"] == pytest.approx(2.0)
+        # Keyword counts: 3, 2, 1 → mean=2.0 (all and present same in simplified parquet)
+        assert stats["mean_keywords_all"] == pytest.approx(2.0)
+        assert stats["mean_keywords_present"] == pytest.approx(2.0)
 
         # Vocabulary: alpha, beta, one, two, three, four, five, gamma, six, seven,
         #             eight, delta, epsilon, nine, ten, eleven, twelve → 17
         assert stats["vocab_size"] == 17
 
-        # Words per keyword: 4.0 / 2.0 = 2.0
-        assert stats["words_per_keyword"] == pytest.approx(2.0)
+        # Words per keyword: each keyword is 1 word → 1.0
+        assert stats["words_per_keyword_all"] == pytest.approx(1.0)
+        assert stats["words_per_keyword_present"] == pytest.approx(1.0)
     finally:
-        path.unlink()
+        json_path.unlink()
+        parquet_path.unlink()
 
 
 def test_compute_dataset_stats_keyword_field():
-    """Verify 'keyword' (singular) field is handled like 'keywords'."""
+    """Verify parquet keywords are counted correctly."""
     docs = [
-        {"title": "T1", "abstract": "a b c", "keyword": "x;y"},
-        {"title": "T2", "abstract": "d e", "keyword": "z"},
+        {"title": "T1", "abstract": "a b c", "keywords": "x;y"},
+        {"title": "T2", "abstract": "d e", "keywords": "z"},
     ]
-    path = _write_jsonl(docs)
+    json_path = _write_jsonl(docs)
+    parquet_path = _write_parquet(docs)
     try:
-        stats = compute_dataset_stats(path)
-        assert stats["mean_keywords"] == pytest.approx(1.5)
+        stats = compute_dataset_stats(json_path, parquet_path)
+        assert stats["mean_keywords_all"] == pytest.approx(1.5)
+        assert stats["mean_keywords_present"] == pytest.approx(1.5)
     finally:
-        path.unlink()
+        json_path.unlink()
+        parquet_path.unlink()
 
 
 def test_compute_dataset_stats_empty_keywords():
@@ -400,14 +437,18 @@ def test_compute_dataset_stats_empty_keywords():
         {"title": "T1", "abstract": "a b c", "keywords": ""},
         {"title": "T2", "abstract": "d e f", "keywords": "k1"},
     ]
-    path = _write_jsonl(docs)
+    json_path = _write_jsonl(docs)
+    parquet_path = _write_parquet(docs)
     try:
-        stats = compute_dataset_stats(path)
-        assert stats["mean_keywords"] == pytest.approx(0.5)
+        stats = compute_dataset_stats(json_path, parquet_path)
+        assert stats["mean_keywords_all"] == pytest.approx(0.5)
+        assert stats["mean_keywords_present"] == pytest.approx(0.5)
         # words_per_keyword should not divide by zero
-        assert stats["words_per_keyword"] > 0
+        assert stats["words_per_keyword_all"] > 0
+        assert stats["words_per_keyword_present"] > 0
     finally:
-        path.unlink()
+        json_path.unlink()
+        parquet_path.unlink()
 
 
 def test_compute_dataset_stats_vocab_sample_limit():
@@ -432,10 +473,11 @@ def test_compute_dataset_stats_vocab_sample_limit():
     ]
     all_words = words_a + words_b
     docs = [{"title": "", "abstract": w, "keywords": "k"} for w in all_words]
-    path = _write_jsonl(docs)
+    json_path = _write_jsonl(docs)
+    parquet_path = _write_parquet(docs)
     try:
-        stats_full = compute_dataset_stats(path, vocab_sample=20)
-        stats_limited = compute_dataset_stats(path, vocab_sample=5)
+        stats_full = compute_dataset_stats(json_path, parquet_path, vocab_sample=20)
+        stats_limited = compute_dataset_stats(json_path, parquet_path, vocab_sample=5)
 
         assert stats_full["nr_documents"] == 20
         assert stats_limited["nr_documents"] == 20
@@ -444,4 +486,5 @@ def test_compute_dataset_stats_vocab_sample_limit():
         assert stats_limited["vocab_size"] == 5
         assert stats_full["vocab_size"] == 20
     finally:
-        path.unlink()
+        json_path.unlink()
+        parquet_path.unlink()
