@@ -94,42 +94,6 @@ def select_samples(
     return samples
 
 
-def build_wide_metrics_df(
-    training_set_results: dict[str, dict[str, dict[str, float | None]]],
-    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
-    benchmarks: list[str] | None = None,
-) -> pl.DataFrame:
-    """Build a wide-format DataFrame for grouped metrics table.
-
-    Args:
-        training_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
-        validation_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
-        benchmarks: List of benchmark names (default: kp20k, kptimes, krapivin)
-
-    Returns:
-        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10 columns.
-    """
-    from keyword_pecker.analysis.data_loading import BENCHMARKS
-
-    if benchmarks is None:
-        benchmarks = BENCHMARKS
-
-    rows = []
-    for group, results in [
-        ("Validation Set FT", validation_set_results),
-        ("Training Set FT", training_set_results),
-    ]:
-        for model_name, bm_data in results.items():
-            row = {"model": model_name, "group": group}
-            for bm in benchmarks:
-                metrics = bm_data.get(bm, {})
-                row[f"{bm}_f1_5"] = metrics.get("f1_5")
-                row[f"{bm}_f1_10"] = metrics.get("f1_10")
-            rows.append(row)
-
-    return pl.DataFrame(rows)
-
-
 def make_comparison_df(
     seke_row: pl.DataFrame, young_haze_row: pl.DataFrame
 ) -> pl.DataFrame:
@@ -181,37 +145,6 @@ def build_keyphrase_stats_table(
         pred_mean, pred_median.
     """
     stats = ["gold_mean", "gold_median", "pred_mean", "pred_median"]
-    rows = []
-
-    for group, per_doc_dict in [
-        ("Training Set FT", training_set_per_doc),
-        ("Validation Set FT", validation_set_per_doc),
-    ]:
-        if per_doc_dict is None:
-            continue
-        for bm in sorted(per_doc_dict):
-            row = {"group": group, "benchmark": bm}
-            row.update(_compute_benchmark_stats(per_doc_dict[bm], stats))
-            rows.append(row)
-
-    return pl.DataFrame(rows)
-
-
-def build_performance_stats_table(
-    training_set_per_doc: dict[str, list[dict]] | None = None,
-    validation_set_per_doc: dict[str, list[dict]] | None = None,
-) -> pl.DataFrame:
-    """Build a long-format DataFrame of extraction performance statistics.
-
-    Args:
-        training_set_per_doc: {benchmark: per_doc_list} from training set evals.
-        validation_set_per_doc: {benchmark: per_doc_list} from validation set evals.
-
-    Returns:
-        DataFrame with columns: group, benchmark, precision_5, recall_5,
-        precision_10, recall_10.
-    """
-    stats = ["precision_5", "recall_5", "precision_10", "recall_10"]
     rows = []
 
     for group, per_doc_dict in [

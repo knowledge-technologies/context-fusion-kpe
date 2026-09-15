@@ -69,8 +69,11 @@ def load_seke_multi_benchmark(
 def load_run_test_row_from_evals(run_dir: Path) -> dict:
     """Load test metrics from a run's evals directory.
 
-    Finds eval_*_test_*.json in run_dir/evals/, extracts f1@5 and f1@10.
-    Returns dict with keys: benchmark, f1_5, f1_10
+    Finds eval_*_test_*.json in run_dir/evals/, extracts precision, recall,
+    and F1 at @5 and @10.
+
+    Returns dict with keys: benchmark, precision_5, recall_5, f1_5,
+        precision_10, recall_10, f1_10
     """
     config_path = run_dir / "config.json"
     with open(config_path) as f:
@@ -90,7 +93,11 @@ def load_run_test_row_from_evals(run_dir: Path) -> dict:
     metrics = eval_data.get("metrics", {})
     return {
         "benchmark": benchmark,
+        "precision_5": metrics.get("precision@5"),
+        "recall_5": metrics.get("recall@5"),
         "f1_5": metrics.get("f1@5"),
+        "precision_10": metrics.get("precision@10"),
+        "recall_10": metrics.get("recall@10"),
         "f1_10": metrics.get("f1@10"),
     }
 
@@ -294,3 +301,84 @@ def load_all_benchmark_per_doc(run_dir: Path) -> dict[str, list[dict]]:
             result[benchmark] = (len(per_doc), per_doc)
 
     return {bm: data for bm, (_, data) in result.items()}
+
+
+def build_f1_table_wide(
+    training_set_results: dict[str, dict[str, dict[str, float | None]]],
+    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Build a wide-format DataFrame for the F1 metrics table.
+
+    Args:
+        training_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        validation_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        benchmarks: List of benchmark names (default: BENCHMARKS)
+
+    Returns:
+        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10 columns.
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    rows = []
+    for group, results in [
+        ("Validation Set FT", validation_set_results),
+        ("Training Set FT", training_set_results),
+    ]:
+        for model_name, bm_data in results.items():
+            row = {"model": model_name, "group": group}
+            for bm in benchmarks:
+                metrics = bm_data.get(bm, {})
+                row[f"{bm}_f1_5"] = metrics.get("f1_5")
+                row[f"{bm}_f1_10"] = metrics.get("f1_10")
+            rows.append(row)
+
+    return pl.DataFrame(rows)
+
+
+def build_precision_recall_table(
+    training_set_results: dict[str, dict[str, dict[str, float | None]]],
+    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Build a long-format DataFrame for the precision/recall metrics table.
+
+    Only includes the "Ours" model, as external baselines typically do not
+    report precision/recall. Uses the same aggregate metrics source as
+    :func:`build_f1_table_wide`, ensuring numerical consistency between
+    F1 and P/R tables.
+
+    Args:
+        training_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
+        validation_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
+        benchmarks: List of benchmark names (default: BENCHMARKS)
+
+    Returns:
+        DataFrame with columns: group, benchmark, precision_5, recall_5,
+        precision_10, recall_10.
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    rows = []
+    for group, results in [
+        ("Validation Set FT", validation_set_results),
+        ("Training Set FT", training_set_results),
+    ]:
+        bm_data = results.get("Ours", {})
+        if not bm_data:
+            continue
+        for bm in benchmarks:
+            metrics = bm_data.get(bm, {})
+            row = {
+                "group": group,
+                "benchmark": bm,
+                "precision_5": metrics.get("precision_5"),
+                "recall_5": metrics.get("recall_5"),
+                "precision_10": metrics.get("precision_10"),
+                "recall_10": metrics.get("recall_10"),
+            }
+            rows.append(row)
+
+    return pl.DataFrame(rows)

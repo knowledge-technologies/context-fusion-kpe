@@ -2,6 +2,8 @@
 
 from keyword_pecker.analysis.data_loading import (
     BENCHMARKS,
+    build_f1_table_wide,
+    build_precision_recall_table,
     load_all_benchmark_per_doc,
     load_all_val_metrics,
     load_per_doc_data,
@@ -15,8 +17,6 @@ from keyword_pecker.analysis.data_loading import (
 from keyword_pecker.analysis.per_doc_analysis import (
     assign_accuracy_tiers,
     build_keyphrase_stats_table,
-    build_performance_stats_table,
-    build_wide_metrics_df,
     make_comparison_df,
     select_samples,
 )
@@ -42,6 +42,8 @@ from keyword_pecker.analysis.tables import (
 __all__ = [
     # Data loading
     "BENCHMARKS",
+    "build_f1_table_wide",
+    "build_precision_recall_table",
     "load_all_benchmark_per_doc",
     "load_run_test_row",
     "load_run_test_row_from_evals",
@@ -54,8 +56,6 @@ __all__ = [
     # Analysis
     "assign_accuracy_tiers",
     "build_keyphrase_stats_table",
-    "build_performance_stats_table",
-    "build_wide_metrics_df",
     "make_comparison_df",
     "select_samples",
     # Tables

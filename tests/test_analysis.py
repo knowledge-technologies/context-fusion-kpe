@@ -8,11 +8,14 @@ import polars as pl
 import pytest
 from numpy.testing import assert_approx_equal
 
+from keyword_pecker.analysis.data_loading import (
+    build_f1_table_wide,
+    build_precision_recall_table,
+)
 from keyword_pecker.analysis.per_doc_analysis import (
     _compute_benchmark_stats,
     assign_accuracy_tiers,
     build_keyphrase_stats_table,
-    build_performance_stats_table,
 )
 from keyword_pecker.analysis.tables import compute_dataset_stats
 
@@ -171,17 +174,67 @@ def test_build_keyphrase_stats_table_partial_none():
 
 
 # ---------------------------------------------------------------------------
-# 4. build_performance_stats_table — correct values + None handling
+# 4. build_f1_table_wide — correct values + None handling
 # ---------------------------------------------------------------------------
 
 
-def test_build_performance_stats_table():
-    training = {"kp20k": _make_per_doc(3)}
-    validation = {"kp20k": _make_per_doc(4)}
+def test_build_f1_table_wide():
+    training = {
+        "SEKE": {"kp20k": {"f1_5": 0.30, "f1_10": 0.25}},
+        "Ours": {"kp20k": {"f1_5": 0.40, "f1_10": 0.35}},
+    }
+    validation = {
+        "SEKE": {"kp20k": {"f1_5": 0.28, "f1_10": 0.23}},
+        "Ours": {"kp20k": {"f1_5": 0.38, "f1_10": 0.33}},
+    }
 
-    df = build_performance_stats_table(training, validation)
+    df = build_f1_table_wide(training, validation, benchmarks=["kp20k"])
 
-    assert df.shape[0] == 2
+    assert df.shape[0] == 4  # 2 models × 2 groups
+    assert set(df.columns) == {"model", "group", "kp20k_f1_5", "kp20k_f1_10"}
+
+    ours_train = df.filter(
+        pl.col("model") == "Ours", pl.col("group") == "Training Set FT"
+    )
+    assert ours_train["kp20k_f1_5"][0] == pytest.approx(0.40)
+    assert ours_train["kp20k_f1_10"][0] == pytest.approx(0.35)
+
+
+def test_build_f1_table_wide_empty():
+    df = build_f1_table_wide({}, {})
+    assert df.shape[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# 5. build_precision_recall_table — correct values + F1 consistency
+# ---------------------------------------------------------------------------
+
+
+def test_build_precision_recall_table():
+    training = {
+        "Ours": {
+            "kp20k": {
+                "precision_5": 0.34,
+                "recall_5": 0.46,
+                "precision_10": 0.28,
+                "recall_10": 0.52,
+            }
+        },
+    }
+    validation = {
+        "Ours": {
+            "kp20k": {
+                "precision_5": 0.26,
+                "recall_5": 0.50,
+                "precision_10": 0.22,
+                "recall_10": 0.55,
+            }
+        },
+    }
+
+    df = build_precision_recall_table(training, validation, benchmarks=["kp20k"])
+
+    assert df.shape[0] == 2  # 1 model × 2 groups
     assert set(df.columns) == {
         "group",
         "benchmark",
@@ -191,24 +244,51 @@ def test_build_performance_stats_table():
         "recall_10",
     }
 
-    training_row = df.filter(
+    train_row = df.filter(
         pl.col("group") == "Training Set FT", pl.col("benchmark") == "kp20k"
     )
-    assert_approx_equal(float(training_row["precision_5"][0]), 0.4, significant=3)
-    assert_approx_equal(float(training_row["recall_5"][0]), 0.5, significant=3)
+    assert_approx_equal(float(train_row["precision_5"][0]), 0.34, significant=3)
+    assert_approx_equal(float(train_row["recall_5"][0]), 0.46, significant=3)
 
 
-def test_build_performance_stats_table_none_inputs():
-    df = build_performance_stats_table(None, None)
+def test_build_precision_recall_table_empty():
+    df = build_precision_recall_table({}, {})
     assert df.shape[0] == 0
 
 
-def test_build_performance_stats_table_partial_none():
-    validation = {"inspec": _make_per_doc(5)}
-    df = build_performance_stats_table(None, validation)
-    assert df.shape[0] == 1
-    assert df["group"][0] == "Validation Set FT"
-    assert df["benchmark"][0] == "inspec"
+def test_f1_pr_consistency():
+    """Verify that F1 ≈ 2*P*R/(P+R) when using the same aggregate source."""
+    # Use consistent values: F1 = 2*P*R/(P+R)
+    # P=0.341, R=0.462 → F1 = 2*0.341*0.462/(0.341+0.462) ≈ 0.392
+    training = {
+        "Ours": {
+            "kp20k": {
+                "f1_5": 0.392,
+                "f1_10": 0.336,
+                "precision_5": 0.341,
+                "recall_5": 0.462,
+                "precision_10": 0.280,
+                "recall_10": 0.420,
+            }
+        },
+    }
+    validation = {}
+
+    f1_df = build_f1_table_wide(training, validation, benchmarks=["kp20k"])
+    pr_df = build_precision_recall_table(training, validation, benchmarks=["kp20k"])
+
+    # Recompute F1 from P and R (grab training row which has values)
+    train_row = pr_df.filter(pl.col("group") == "Training Set FT")
+    p5 = float(train_row["precision_5"][0])
+    r5 = float(train_row["recall_5"][0])
+    recomputed_f1_5 = 2 * p5 * r5 / (p5 + r5)
+
+    reported_f1_5 = float(
+        f1_df.filter(pl.col("group") == "Training Set FT")["kp20k_f1_5"][0]
+    )
+
+    # Should be consistent within rounding tolerance
+    assert_approx_equal(recomputed_f1_5, reported_f1_5, significant=2)
 
 
 # ---------------------------------------------------------------------------
