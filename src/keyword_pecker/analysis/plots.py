@@ -1,5 +1,6 @@
 """Plotting functions for training dynamics and metrics visualization."""
 
+import numpy as np
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -497,3 +498,190 @@ def plot_keyphrase_stats(
         fig.savefig(fig_dir / "keyphrase_stats.pdf", bbox_inches="tight")
 
     return fig
+
+
+def plot_ecdf_confidence(
+    keyphrase_df: pl.DataFrame,
+    fig_dir: Path | None = None,
+    save: bool = False,
+) -> "Figure":
+    """Plot ECDF of confidence scores by match type with rug plot.
+
+    Args:
+        keyphrase_df: DataFrame with score and match_type columns.
+        fig_dir: Directory to save output files.
+        save: Whether to write files to disk.
+
+    Returns:
+        The matplotlib Figure.
+    """
+    import matplotlib
+    import matplotlib.pyplot as plt
+
+    match_types = ["none", "partial", "full"]
+    match_types_nice = {"none": "Non-match", "partial": "Partial", "full": "Exact"}
+    colors = {"none": "#e74c3c", "partial": "#f39c12", "full": "#27ae60"}
+    rug_levels = {"none": 0.15, "partial": 0.5, "full": 0.85}
+    rug_height = 0.12
+
+    ecdf_fig = plt.figure(figsize=(8, 6))
+    gs = matplotlib.gridspec.GridSpec(
+        2, 1, height_ratios=[1, 4], hspace=0.05, figure=ecdf_fig
+    )
+    rug_ax = ecdf_fig.add_subplot(gs[0])
+    ecdf_ax = ecdf_fig.add_subplot(gs[1], sharex=rug_ax)
+
+    scores_by_mt = {}
+    for mt in match_types:
+        scores = keyphrase_df.filter(pl.col("match_type") == mt)["score"].sort()
+        scores_by_mt[mt] = scores
+        n = len(scores)
+        y = rug_levels[mt]
+        rug_ax.vlines(
+            scores,
+            y - rug_height,
+            y + rug_height,
+            colors=colors[mt],
+            alpha=0.8,
+            linewidth=0.3,
+        )
+        ecdf_ax.ecdf(scores, label=f"{match_types_nice[mt]} (n={n})", color=colors[mt])
+
+    threshold = 0.9
+    rug_ax.axvline(x=threshold, color="gray", linestyle="--", alpha=0.5)
+    ecdf_ax.axvline(x=threshold, color="gray", linestyle="--", alpha=0.5)
+
+    for mt in match_types:
+        scores = scores_by_mt[mt]
+        n = len(scores)
+        fraction = float((scores <= threshold).sum() / n)
+        ecdf_ax.hlines(
+            fraction, 0.5, threshold, colors=colors[mt], linestyles="--", alpha=0.6
+        )
+        ecdf_ax.text(
+            0.51,
+            fraction + 0.01,
+            f"{fraction * 100:.1f}%",
+            color="dimgray",
+            fontsize=11,
+            ha="left",
+            va="bottom",
+        )
+
+    rug_ax.set_yticks([])
+    rug_ax.set_ylim(0, 1)
+    rug_ax.spines["top"].set_visible(False)
+    rug_ax.spines["right"].set_visible(False)
+    rug_ax.spines["bottom"].set_visible(False)
+    rug_ax.spines["left"].set_visible(False)
+    rug_ax.set_xlim(0.5, 1.0)
+
+    ecdf_ax.set_xlabel("Confidence Score", fontsize=14)
+    ecdf_ax.set_ylabel("ECDF\nFraction keyphrases <= score", fontsize=14)
+    ecdf_ax.set_xlim(0.5, 1.0)
+    ecdf_ax.legend(title="Keyphrase Match", fontsize=12, title_fontsize=13)
+    ecdf_ax.grid(True, alpha=0.3)
+
+    if save and fig_dir is not None:
+        print("Saving ecdf_confidence_by_match_type.png")
+        ecdf_fig.savefig(fig_dir / "ecdf_confidence_by_match_type.png", dpi=150)
+        print("Saving ecdf_confidence_by_match_type.pdf")
+        ecdf_fig.savefig(
+            fig_dir / "ecdf_confidence_by_match_type.pdf", bbox_inches="tight"
+        )
+
+    return ecdf_fig
+
+
+def plot_stacked_bar_match_type(
+    keyphrase_df: pl.DataFrame,
+    q25: float,
+    q75: float,
+    fig_dir: Path | None = None,
+    save: bool = False,
+) -> "Figure":
+    """Plot stacked bar of match type proportions by accuracy tier.
+
+    Args:
+        keyphrase_df: DataFrame with accuracy_tier and match_type columns.
+        q25: F1@5 25th percentile value (for axis labels).
+        q75: F1@5 75th percentile value (for axis labels).
+        fig_dir: Directory to save output files.
+        save: Whether to write files to disk.
+
+    Returns:
+        The matplotlib Figure.
+    """
+    import matplotlib.pyplot as plt
+
+    tier_order = ["low", "mid", "high"]
+
+    proportions = (
+        keyphrase_df.group_by(["accuracy_tier", "match_type"])
+        .agg(count=pl.col("keyword").count())
+        .with_columns(
+            (pl.col("count") / pl.col("count").sum().over("accuracy_tier")).alias(
+                "proportion"
+            )
+        )
+    )
+
+    bar_fig, bar_ax = plt.subplots(figsize=(6.5, 5))
+
+    colors = {"none": "#e74c3c", "partial": "#f39c12", "full": "#27ae60"}
+    labels = {"none": "Non-match", "partial": "Partial", "full": "Exact"}
+    bottom = np.zeros(3)
+
+    for mt in ["none", "partial", "full"]:
+        vals = []
+        counts = []
+        for tier in tier_order:
+            row = proportions.filter(
+                (pl.col("accuracy_tier") == tier) & (pl.col("match_type") == mt)
+            )
+            vals.append(row["proportion"][0] if len(row) > 0 else 0.0)
+            counts.append(int(row["count"][0] if len(row) > 0 else 0))
+        bar_ax.bar(tier_order, vals, bottom=bottom, label=labels[mt], color=colors[mt])
+        for i, (v, c) in enumerate(zip(vals, counts)):
+            if v > 0.05:
+                bar_ax.text(
+                    i,
+                    bottom[i] + v / 2,
+                    str(c),
+                    ha="center",
+                    va="center",
+                    fontsize=12,
+                    fontweight="bold",
+                    color="white",
+                )
+        bottom += np.array(vals)
+
+    q25_str = f"{q25:.2f}"
+    q75_str = f"{q75:.2f}"
+    bar_ax.set_xticks(range(3))
+    bar_ax.set_xticklabels(
+        [
+            f"Low (Q1)\nF1@5 <= {q25_str}",
+            "Mid (Q2-Q3)",
+            f"High (Q4)\nF1@5 >= {q75_str}",
+        ]
+    )
+
+    bar_ax.set_ylabel("Proportion of Keyphrases (%)", fontsize=14)
+    bar_ax.set_xlabel("Accuracy Tier", fontsize=14)
+    bar_ax.legend(title="Match Status", fontsize=12, title_fontsize=13)
+    bar_ax.grid(True, alpha=0.3, axis="y")
+    bar_ax.spines["right"].set_visible(False)
+    bar_ax.spines["top"].set_visible(False)
+
+    bar_fig.tight_layout()
+
+    if save and fig_dir is not None:
+        print("Saving stacked_bar_match_type_by_tier.png")
+        bar_fig.savefig(fig_dir / "stacked_bar_match_type_by_tier.png", dpi=150)
+        print("Saving stacked_bar_match_type_by_tier.pdf")
+        bar_fig.savefig(
+            fig_dir / "stacked_bar_match_type_by_tier.pdf", bbox_inches="tight"
+        )
+
+    return bar_fig

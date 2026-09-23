@@ -13,59 +13,6 @@ if TYPE_CHECKING:
 
 BENCHMARKS = ["kp20k", "kptimes", "inspec"]
 
-MODEL_NAME_MAP = {
-    "TextRank": "TextRank (unsupervised)",
-    "TNT-KID": "TNT-KID (supervised)",
-    "Gemini1.5-Flash-mini-8B": "Gemini1.5-Flash-mini-8B (LLM)",
-}
-
-
-def load_external_benchmarks(
-    path: Path | str,
-    benchmarks: list[str] | None = None,
-) -> pl.DataFrame:
-    """Load external benchmark metrics from a JSON file.
-
-    Args:
-        path: Path to the benchmarks JSON file.
-        benchmarks: List of benchmark names to include (defaults to BENCHMARKS).
-
-    Returns:
-        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10.
-    """
-    from keyword_pecker.analysis.data_loading import BENCHMARKS
-
-    if benchmarks is None:
-        benchmarks = BENCHMARKS
-
-    with open(path) as f:
-        data = json.load(f)
-
-    model_lookup = {k.lower(): v for k, v in data.items()}
-
-    rows = []
-    for model_key, model_name in MODEL_NAME_MAP.items():
-        model_data = model_lookup.get(model_key.lower())
-        if model_data is None:
-            continue
-        row = {"model": model_name, "group": "Published Baselines"}
-        bm_section = model_data.get("benchmarks", {})
-        bm_section_lookup = {k.lower(): k for k in bm_section}
-        for bm in benchmarks:
-            bm_key = bm_section_lookup.get(bm.lower())
-            if bm_key is None:
-                row[f"{bm}_f1_5"] = None
-                row[f"{bm}_f1_10"] = None
-                continue
-            bm_vals = bm_section[bm_key]
-            f1_5 = bm_vals.get("F1@5")
-            f1_10 = bm_vals.get("F1@10")
-            row[f"{bm}_f1_5"] = f1_5["mean"] / 100 if f1_5 else None
-            row[f"{bm}_f1_10"] = f1_10["mean"] / 100 if f1_10 else None
-        rows.append(row)
-
-    return pl.DataFrame(rows)
-
 
 BENCHMARK_COLORS = {
     "kp20k": "#E69F00",
@@ -582,6 +529,87 @@ def compute_dataset_stats(
         "words_per_keyword_all": words_per_keyword_all,
         "words_per_keyword_present": words_per_keyword_present,
     }
+
+
+def build_f1_table_wide(
+    training_set_results: dict[str, dict[str, dict[str, float | None]]],
+    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Build a wide-format DataFrame for the F1 metrics table.
+
+    Args:
+        training_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        validation_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
+        benchmarks: List of benchmark names (default: BENCHMARKS)
+
+    Returns:
+        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10 columns.
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    rows = []
+    for group, results in [
+        ("Validation Set FT", validation_set_results),
+        ("Training Set FT", training_set_results),
+    ]:
+        for model_name, bm_data in results.items():
+            row = {"model": model_name, "group": group}
+            for bm in benchmarks:
+                metrics = bm_data.get(bm, {})
+                row[f"{bm}_f1_5"] = metrics.get("f1_5")
+                row[f"{bm}_f1_10"] = metrics.get("f1_10")
+            rows.append(row)
+
+    return pl.DataFrame(rows)
+
+
+def build_precision_recall_table(
+    training_set_results: dict[str, dict[str, dict[str, float | None]]],
+    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+    benchmarks: list[str] | None = None,
+) -> pl.DataFrame:
+    """Build a long-format DataFrame for the precision/recall metrics table.
+
+    Only includes the "Ours" model, as external baselines typically do not
+    report precision/recall. Uses the same aggregate metrics source as
+    :func:`build_f1_table_wide`, ensuring numerical consistency between
+    F1 and P/R tables.
+
+    Args:
+        training_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
+        validation_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
+        benchmarks: List of benchmark names (default: BENCHMARKS)
+
+    Returns:
+        DataFrame with columns: group, benchmark, precision_5, recall_5,
+        precision_10, recall_10.
+    """
+    if benchmarks is None:
+        benchmarks = BENCHMARKS
+
+    rows = []
+    for group, results in [
+        ("Validation Set FT", validation_set_results),
+        ("Training Set FT", training_set_results),
+    ]:
+        bm_data = results.get("Ours", {})
+        if not bm_data:
+            continue
+        for bm in benchmarks:
+            metrics = bm_data.get(bm, {})
+            row = {
+                "group": group,
+                "benchmark": bm,
+                "precision_5": metrics.get("precision_5"),
+                "recall_5": metrics.get("recall_5"),
+                "precision_10": metrics.get("precision_10"),
+                "recall_10": metrics.get("recall_10"),
+            }
+            rows.append(row)
+
+    return pl.DataFrame(rows)
 
 
 def make_dataset_stats_tex(

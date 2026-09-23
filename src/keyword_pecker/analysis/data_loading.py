@@ -8,6 +8,12 @@ import polars as pl
 
 BENCHMARKS = ["kp20k", "kptimes", "inspec"]
 
+MODEL_NAME_MAP = {
+    "TextRank": "TextRank (unsupervised)",
+    "TNT-KID": "TNT-KID (supervised)",
+    "Gemini1.5-Flash-mini-8B": "Gemini1.5-Flash-mini-8B (LLM)",
+}
+
 
 def load_run_test_row(run_dir: Path) -> dict:
     """Load test metrics from a single run directory.
@@ -177,7 +183,7 @@ def load_per_doc_data(young_haze_dir: Path) -> tuple[list[dict], pl.DataFrame]:
         num_pred = len(pred_kws)
         num_gold = d["num_gold"]
         has_partial = any(
-            _classify_match_type(p["keyword"], gold_kws, p.get("matched")) == "partial"
+            classify_match_type(p["keyword"], gold_kws, p.get("matched")) == "partial"
             for p in pred_kws
         )
         rows.append(
@@ -261,7 +267,7 @@ def load_all_val_metrics(young_haze_dir: Path) -> pl.DataFrame:
     ).collect()
 
 
-def _classify_match_type(pred_kw: str, gold_kws: list[str], matched_flag: bool) -> str:
+def classify_match_type(pred_kw: str, gold_kws: list[str], matched_flag: bool) -> str:
     """Classify a predicted keyword as full, partial, or no match."""
     if matched_flag:
         return "full"
@@ -273,6 +279,88 @@ def _classify_match_type(pred_kw: str, gold_kws: list[str], matched_flag: bool) 
         if pred_words & gold_words:
             return "partial"
     return "none"
+
+
+def build_keyphrase_level_df(
+    per_doc: list[dict],
+    per_doc_df: pl.DataFrame,
+) -> pl.DataFrame:
+    """Build keyphrase-level DataFrame with match_type, joined with accuracy tiers.
+
+    Args:
+        per_doc: List of per-document eval dicts from eval JSON.
+        per_doc_df: Per-document DataFrame (must have doc_row, accuracy_tier columns).
+
+    Returns:
+        DataFrame with columns: doc_row, keyword, score, matched, match_type,
+        word_count, accuracy_tier.
+    """
+    rows = []
+    for d in per_doc:
+        doc_row = d["doc_row"]
+        gold_kws = d["gold_keywords"]
+        for p in d["pred_keywords"]:
+            matched = p.get("matched", False)
+            mt = classify_match_type(p["keyword"], gold_kws, matched)
+            rows.append(
+                {
+                    "doc_row": doc_row,
+                    "keyword": p["keyword"],
+                    "score": p["score"],
+                    "matched": matched,
+                    "match_type": mt,
+                    "word_count": len(p["keyword"].split()),
+                }
+            )
+
+    keyphrase_df = pl.DataFrame(rows).join(
+        per_doc_df.select(["doc_row", "accuracy_tier"]), on="doc_row", how="left"
+    )
+    return keyphrase_df
+
+
+def build_keyphrase_count_summary(per_doc_df: pl.DataFrame) -> pl.DataFrame:
+    """Build summary statistics for gold/pred keyphrase counts and delta.
+
+    Args:
+        per_doc_df: Per-document DataFrame with num_gold, num_pred columns.
+
+    Returns:
+        DataFrame with columns: metric, mean, median, std, min, max.
+    """
+    import numpy as np
+
+    delta = per_doc_df.with_columns(
+        (pl.col("num_pred") - pl.col("num_gold")).alias("delta")
+    )
+
+    summary_rows = [
+        {
+            "metric": "Gold keyphrases",
+            "mean": per_doc_df["num_gold"].mean(),
+            "median": float(np.median(per_doc_df["num_gold"])),
+            "std": per_doc_df["num_gold"].std(),
+            "min": per_doc_df["num_gold"].min(),
+            "max": per_doc_df["num_gold"].max(),
+        },
+        {
+            "metric": "Predicted keyphrases",
+            "mean": per_doc_df["num_pred"].mean(),
+            "median": float(np.median(per_doc_df["num_pred"])),
+            "std": per_doc_df["num_pred"].std(),
+            "min": per_doc_df["num_pred"].min(),
+            "max": per_doc_df["num_pred"].max(),
+        },
+        {
+            "metric": "Delta (pred - gold)",
+            "mean": delta["delta"].mean(),
+            "median": float(np.median(delta["delta"])),
+            "std": delta["delta"].std(),
+            "min": delta["delta"].min(),
+            "max": delta["delta"].max(),
+        },
+    ]
+    return pl.DataFrame(summary_rows)
 
 
 def load_all_benchmark_per_doc(run_dir: Path) -> dict[str, list[dict]]:
@@ -303,82 +391,46 @@ def load_all_benchmark_per_doc(run_dir: Path) -> dict[str, list[dict]]:
     return {bm: data for bm, (_, data) in result.items()}
 
 
-def build_f1_table_wide(
-    training_set_results: dict[str, dict[str, dict[str, float | None]]],
-    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
+def load_external_benchmarks(
+    path: Path | str,
     benchmarks: list[str] | None = None,
 ) -> pl.DataFrame:
-    """Build a wide-format DataFrame for the F1 metrics table.
+    """Load external benchmark metrics from a JSON file.
 
     Args:
-        training_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
-        validation_set_results: {model_name: {benchmark: {f1_5, f1_10}}}
-        benchmarks: List of benchmark names (default: BENCHMARKS)
+        path: Path to the benchmarks JSON file.
+        benchmarks: List of benchmark names to include (defaults to BENCHMARKS).
 
     Returns:
-        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10 columns.
+        DataFrame with columns: model, group, and per-benchmark f1_5/f1_10.
     """
     if benchmarks is None:
         benchmarks = BENCHMARKS
 
-    rows = []
-    for group, results in [
-        ("Validation Set FT", validation_set_results),
-        ("Training Set FT", training_set_results),
-    ]:
-        for model_name, bm_data in results.items():
-            row = {"model": model_name, "group": group}
-            for bm in benchmarks:
-                metrics = bm_data.get(bm, {})
-                row[f"{bm}_f1_5"] = metrics.get("f1_5")
-                row[f"{bm}_f1_10"] = metrics.get("f1_10")
-            rows.append(row)
+    with open(path) as f:
+        data = json.load(f)
 
-    return pl.DataFrame(rows)
-
-
-def build_precision_recall_table(
-    training_set_results: dict[str, dict[str, dict[str, float | None]]],
-    validation_set_results: dict[str, dict[str, dict[str, float | None]]],
-    benchmarks: list[str] | None = None,
-) -> pl.DataFrame:
-    """Build a long-format DataFrame for the precision/recall metrics table.
-
-    Only includes the "Ours" model, as external baselines typically do not
-    report precision/recall. Uses the same aggregate metrics source as
-    :func:`build_f1_table_wide`, ensuring numerical consistency between
-    F1 and P/R tables.
-
-    Args:
-        training_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
-        validation_set_results: {model_name: {benchmark: {precision_5, recall_5, precision_10, recall_10}}}
-        benchmarks: List of benchmark names (default: BENCHMARKS)
-
-    Returns:
-        DataFrame with columns: group, benchmark, precision_5, recall_5,
-        precision_10, recall_10.
-    """
-    if benchmarks is None:
-        benchmarks = BENCHMARKS
+    model_lookup = {k.lower(): v for k, v in data.items()}
 
     rows = []
-    for group, results in [
-        ("Validation Set FT", validation_set_results),
-        ("Training Set FT", training_set_results),
-    ]:
-        bm_data = results.get("Ours", {})
-        if not bm_data:
+    for model_key, model_name in MODEL_NAME_MAP.items():
+        model_data = model_lookup.get(model_key.lower())
+        if model_data is None:
             continue
+        row = {"model": model_name, "group": "Published Baselines"}
+        bm_section = model_data.get("benchmarks", {})
+        bm_section_lookup = {k.lower(): k for k in bm_section}
         for bm in benchmarks:
-            metrics = bm_data.get(bm, {})
-            row = {
-                "group": group,
-                "benchmark": bm,
-                "precision_5": metrics.get("precision_5"),
-                "recall_5": metrics.get("recall_5"),
-                "precision_10": metrics.get("precision_10"),
-                "recall_10": metrics.get("recall_10"),
-            }
-            rows.append(row)
+            bm_key = bm_section_lookup.get(bm.lower())
+            if bm_key is None:
+                row[f"{bm}_f1_5"] = None
+                row[f"{bm}_f1_10"] = None
+                continue
+            bm_vals = bm_section[bm_key]
+            f1_5 = bm_vals.get("F1@5")
+            f1_10 = bm_vals.get("F1@10")
+            row[f"{bm}_f1_5"] = f1_5["mean"] / 100 if f1_5 else None
+            row[f"{bm}_f1_10"] = f1_10["mean"] / 100 if f1_10 else None
+        rows.append(row)
 
     return pl.DataFrame(rows)

@@ -2,10 +2,12 @@
 
 from keyword_pecker.analysis.data_loading import (
     BENCHMARKS,
-    build_f1_table_wide,
-    build_precision_recall_table,
+    build_keyphrase_count_summary,
+    build_keyphrase_level_df,
+    classify_match_type,
     load_all_benchmark_per_doc,
     load_all_val_metrics,
+    load_external_benchmarks,
     load_per_doc_data,
     load_run_test_row,
     load_run_test_row_from_evals,
@@ -21,17 +23,20 @@ from keyword_pecker.analysis.per_doc_analysis import (
     select_samples,
 )
 from keyword_pecker.analysis.plots import (
+    plot_ecdf_confidence,
     plot_keyphrase_stats,
     plot_loss_f1_overview,
     plot_loss_overview,
     plot_modernbert_dynamics,
+    plot_stacked_bar_match_type,
     plot_training_dynamics,
 )
 from keyword_pecker.analysis.tables import (
     BENCHMARK_COLORS,
     LATEX_COLOR_DEFINITIONS,
+    build_f1_table_wide,
+    build_precision_recall_table,
     compute_dataset_stats,
-    load_external_benchmarks,
     make_dataset_stats_tex,
     make_metrics_table_gt,
     make_metrics_table_tex,
@@ -42,9 +47,11 @@ from keyword_pecker.analysis.tables import (
 __all__ = [
     # Data loading
     "BENCHMARKS",
-    "build_f1_table_wide",
-    "build_precision_recall_table",
+    "build_keyphrase_count_summary",
+    "build_keyphrase_level_df",
+    "classify_match_type",
     "load_all_benchmark_per_doc",
+    "load_external_benchmarks",
     "load_run_test_row",
     "load_run_test_row_from_evals",
     "load_seke_multi_benchmark",
@@ -61,17 +68,20 @@ __all__ = [
     # Tables
     "BENCHMARK_COLORS",
     "LATEX_COLOR_DEFINITIONS",
+    "build_f1_table_wide",
+    "build_precision_recall_table",
     "compute_dataset_stats",
-    "load_external_benchmarks",
     "make_dataset_stats_tex",
     "make_metrics_table_gt",
     "make_metrics_table_tex",
     "make_precision_recall_table_tex",
     "make_samples_table_tex",
     # Plots
+    "plot_ecdf_confidence",
     "plot_keyphrase_stats",
     "plot_loss_overview",
     "plot_training_dynamics",
     "plot_loss_f1_overview",
     "plot_modernbert_dynamics",
+    "plot_stacked_bar_match_type",
 ]
