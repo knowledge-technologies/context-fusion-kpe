@@ -12,7 +12,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from keyword_pecker.data import RUNS_MAPPING_PATH
+from keyword_pecker.data import KP20K_TRAINING_SET_EVAL_FILE, RUNS_MAPPING_PATH
 from keyword_pecker.data.external import (
     BENCHMARKS_EVALS_PATH,
     SEKE_TRAINSET_PATH,
@@ -308,11 +308,9 @@ def run_error_analysis(fig_dir: Path, save: bool) -> None:
     runs_root = get_runs_root()
     yh_dir = runs_root / "young-haze-50"
 
-    eval_files = list((yh_dir / "evals").glob("eval_*_test_*.json"))
-    if not eval_files:
-        raise FileNotFoundError(f"No eval test files found in {yh_dir / 'evals'}")
-    eval_files.sort(reverse=True)
-    eval_path = eval_files[0]
+    eval_path = yh_dir / "evals" / KP20K_TRAINING_SET_EVAL_FILE
+    if not eval_path.exists():
+        raise FileNotFoundError(f"Missing eval file: {eval_path}")
 
     with open(eval_path) as f:
         eval_data = json.load(f)
