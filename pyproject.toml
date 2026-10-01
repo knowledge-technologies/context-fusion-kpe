@@ -32,6 +32,7 @@ en_core_web_sm = { url = "https://github.com/explosion/spacy-models/releases/dow
 
 [project.scripts]
 keyword-pecker = "keyword_pecker:main"
+reproduce-manuscript-artifacts = "keyword_pecker.cli.reproduce:main"
 
 [build-system]
 requires = ["uv_build>=0.9.16,<0.10.0"]

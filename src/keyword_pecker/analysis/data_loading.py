@@ -168,9 +168,13 @@ def load_young_haze_row(young_haze_dir: Path) -> pl.DataFrame:
     )
 
 
-def load_per_doc_data(young_haze_dir: Path) -> tuple[list[dict], pl.DataFrame]:
+def load_per_doc_data(run_dir: Path) -> tuple[list[dict], pl.DataFrame]:
     """Load per-document evaluation data with match classification and accuracy tiers."""
-    eval_path = young_haze_dir / "evals" / "eval_kp20k_test_20260812T122055Z.json"
+    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+    if not eval_files:
+        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+    eval_files.sort(reverse=True)
+    eval_path = eval_files[0]
     with open(eval_path) as f:
         eval_data = json.load(f)
     per_doc = eval_data["per_doc"]
