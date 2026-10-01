@@ -27,6 +27,8 @@ Example usage:
     write_parquet(data, output_path)
 """
 
+from pathlib import Path
+
 from keyword_pecker.data.paths import (
     ensure_derived_dir,
     get_dataset_folder,
@@ -64,6 +66,8 @@ from keyword_pecker.data.external import (
     SEKE_VALSET_PATH,
 )
 
+RUNS_MAPPING_PATH = Path(__file__).parent / "runs.json"
+
 __all__ = [
     # Path utilities
     "ensure_derived_dir",
@@ -72,6 +76,8 @@ __all__ = [
     "get_derived_path",
     "get_metadata_path",
     "list_dataset_files",
+    # Runs mapping
+    "RUNS_MAPPING_PATH",
     # External data paths
     "BENCHMARKS_EVALS_PATH",
     "EXTERNAL_DIR",

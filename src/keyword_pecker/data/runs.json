@@ -1,0 +1,22 @@
+{
+  "kp20k_training_set": {
+    "run_id": "young-haze-50",
+    "benchmark": "kp20k",
+    "description": "Training fine-tuning run, evaluated on KP20k test set"
+  },
+  "kp20k_validation_set": {
+    "run_id": "curious-smoke-52",
+    "benchmark": "kp20k",
+    "description": "Validation fine-tuning run on KP20k, reported in validation set table"
+  },
+  "kptimes_validation_set": {
+    "run_id": "dutiful-oath-53",
+    "benchmark": "kptimes",
+    "description": "Validation fine-tuning  run on KPTimes"
+  },
+  "inspec_validation_set": {
+    "run_id": "spring-bird-54",
+    "benchmark": "inspec",
+    "description": "Validation fine-tuning run on Inspec"
+  }
+}
