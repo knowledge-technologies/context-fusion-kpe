@@ -230,7 +230,7 @@ manuscript-artifacts/
 | `kptimes_validation_set` | `dutiful-oath-53` | kptimes |
 | `inspec_validation_set` | `spring-bird-54` | inspec |
 
-See `doc/runs.json` for the full mapping.
+See `src/keyword_pecker/data/runs.json` for the full mapping.
 
 ### Generate Artifacts
 
@@ -241,8 +241,11 @@ uv run reproduce-manuscript-artifacts
 Or without installing:
 
 ```bash
-uvx git+https://github.com/<owner>/keyword-pecker#reproduce-manuscript-artifacts
+uvx --from git+https://github.com/<owner>/<repo_url> reproduce-manuscript-artifacts
 ```
+
+> [!NOTE]
+> The `en_core_web_sm` spaCy model (~15MB) is downloaded automatically on first run.
 
 Output is saved to `./manuscript-artifacts/` by default (override with `--output-dir`).
 
