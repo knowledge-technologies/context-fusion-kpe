@@ -1,0 +1,68 @@
+{
+  "TextRank": {
+    "metric": "F1",
+    "note": "Mean only (no SD available)",
+    "benchmarks": {
+      "KP20k": {
+        "F1@5": {"mean": 18.0},
+        "F1@10": {"mean": 15.0}
+      },
+      "Inspec": {
+        "F1@5": {"mean": 28.6},
+        "F1@10": {"mean": 33.9}
+      },
+      "Krapivin": {
+        "F1@5": {"mean": 18.5},
+        "F1@10": {"mean": 16.0}
+      },
+      "KPTimes": {
+        "F1@5": {"mean": 2.2},
+        "F1@10": {"mean": 3.0}
+      }
+    }
+  },
+  "Gemini1.5-Flash-mini-8B": {
+    "metric": "F1",
+    "note": "Mean only (no SD available)",
+    "benchmarks": {
+      "KP20k": {
+        "F1@5": {"mean": 26.5},
+        "F1@10": {"mean": 23.6}
+      },
+      "Inspec": {
+        "F1@5": {"mean": 35.9},
+        "F1@10": {"mean": 42.1}
+      },
+      "Krapivin": {
+        "F1@5": {"mean": 26.6},
+        "F1@10": {"mean": 25.9}
+      },
+      "KPTimes": {
+        "F1@5": {"mean": 20.4},
+        "F1@10": {"mean": 26.9}
+      }
+    }
+  },
+  "TNT-KID": {
+    "metric": "F1",
+    "note": "Mean only (no SD available)",
+    "benchmarks": {
+      "KP20k": {
+        "F1@5": {"mean": 33.6},
+        "F1@10": {"mean": 33.8}
+      },
+      "Inspec": {
+        "F1@5": {"mean": 46.0},
+        "F1@10": {"mean": 53.6}
+      },
+      "Krapivin": {
+        "F1@5": {"mean": 31.0},
+        "F1@10": {"mean": 32.0}
+      },
+      "KPTimes": {
+        "F1@5": {"mean": 48.5},
+        "F1@10": {"mean": 48.5}
+      }
+    }
+  }
+}

@@ -57,6 +57,12 @@ from keyword_pecker.data.dataset import (
     compute_class_weights,
     create_keyphrase_dataloader,
 )
+from keyword_pecker.data.external import (
+    BENCHMARKS_EVALS_PATH,
+    EXTERNAL_DIR,
+    SEKE_TRAINSET_PATH,
+    SEKE_VALSET_PATH,
+)
 
 __all__ = [
     # Path utilities
@@ -66,6 +72,11 @@ __all__ = [
     "get_derived_path",
     "get_metadata_path",
     "list_dataset_files",
+    # External data paths
+    "BENCHMARKS_EVALS_PATH",
+    "EXTERNAL_DIR",
+    "SEKE_TRAINSET_PATH",
+    "SEKE_VALSET_PATH",
     # Preprocessing functions
     "SENTENCE_SCHEMA",
     "build_keyword_regex",

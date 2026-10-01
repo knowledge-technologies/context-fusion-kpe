@@ -1,0 +1,22 @@
+{
+  "metric": "F1",
+  "note": "Mean +/- SD across 5 runs",
+  "benchmarks": {
+    "KP20k": {
+      "F1@5":  {"mean": 32.7, "sd": 1.1},
+      "F1@10": {"mean": 33.0, "sd": 1.1}
+    },
+    "Inspec": {
+      "F1@5":  {"mean": 47.2, "sd": 1.1},
+      "F1@10": {"mean": 56.5, "sd": 1.0}
+    },
+    "Krapivin": {
+      "F1@5":  {"mean": 29.5, "sd": 1.1},
+      "F1@10": {"mean": 30.1, "sd": 1.0}
+    },
+    "KPTimes": {
+      "F1@5":  {"mean": 44.9, "sd": 0.3},
+      "F1@10": {"mean": 45.1, "sd": 0.3}
+    }
+  }
+}
