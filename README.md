@@ -150,6 +150,102 @@ The `slurm/` directory contains batch scripts for cluster job submission. They r
 
 Submit via `make remote-train SERVER=kt-gpu4` or directly with `sbatch`.
 
+## Reproducing Manuscript Artifacts
+
+All tables and figures from the manuscript can be reproduced from run folders and bundled external data.
+
+### Input Structure
+
+```
+experiment-data/
+├── runs/
+│   ├── young-haze-50/
+│   │   ├── config.json
+│   │   ├── metrics.json
+│   │   └── evals/
+│   │       └── eval_kp20k_test_*.json
+│   ├── curious-smoke-52/
+│   │   ├── config.json
+│   │   └── evals/
+│   │       └── eval_kp20k_test_*.json
+│   ├── dutiful-oath-53/
+│   │   ├── config.json
+│   │   └── evals/
+│   │       └── eval_kptimes_test_*.json
+│   └── spring-bird-54/
+│       ├── config.json
+│       └── evals/
+│           └── eval_inspec_test_*.json
+├── kp20k/                          # optional
+│   ├── kp20k_valid.json
+│   └── derived/
+│       └── valid.parquet
+├── kptimes/
+│   ├── kptimes_valid.json
+│   └── derived/
+│       └── valid.parquet
+└── inspec/
+    ├── inspec_valid.json
+    └── derived/
+        └── valid.parquet
+```
+
+Set in `.env`:
+
+```
+DATASET_FOLDER=/path/to/experiment-data/
+```
+
+The runs folder is resolved automatically as `$DATASET_FOLDER/runs`.
+
+### Generated Artifacts
+
+```
+manuscript-artifacts/
+├── metrics_table.png
+├── metrics_table.tex
+├── dataset_stats_table.tex          # only if dataset files present
+├── precision_recall_table.tex
+├── samples_table.tex
+├── loss_overview.png
+├── loss_overview.pdf
+├── training_dynamics.png
+├── loss_f1_overview.png
+├── loss_f1_overview.pdf
+├── modernbert_dynamics.png
+├── keyphrase_stats.png
+├── keyphrase_stats.pdf
+├── ecdf_confidence_by_match_type.png
+├── ecdf_confidence_by_match_type.pdf
+├── stacked_bar_match_type_by_tier.png
+└── stacked_bar_match_type_by_tier.pdf
+```
+
+### Run Mapping
+
+| Semantic name | W&B run ID | Benchmark |
+|---|---|---|
+| `kp20k_training_set` | `young-haze-50` | kp20k |
+| `kp20k_validation_set` | `curious-smoke-52` | kp20k |
+| `kptimes_validation_set` | `dutiful-oath-53` | kptimes |
+| `inspec_validation_set` | `spring-bird-54` | inspec |
+
+See `doc/runs.json` for the full mapping.
+
+### Generate Artifacts
+
+```bash
+uv run reproduce-manuscript-artifacts
+```
+
+Or without installing:
+
+```bash
+uvx git+https://github.com/<owner>/keyword-pecker#reproduce-manuscript-artifacts
+```
+
+Output is saved to `./manuscript-artifacts/` by default (override with `--output-dir`).
+
 ## Running Tests
 
 Run the test suite using `pytest`:
