@@ -72,11 +72,11 @@ def load_seke_multi_benchmark(
     return pl.DataFrame(rows)
 
 
-def load_run_test_row_from_evals(run_dir: Path) -> dict:
+def load_run_test_row_from_evals(run_dir: Path, eval_file: str | None = None) -> dict:
     """Load test metrics from a run's evals directory.
 
     Finds eval_*_test_*.json in run_dir/evals/, extracts precision, recall,
-    and F1 at @5 and @10.
+    and F1 at @5 and @10. If eval_file is provided, uses that specific file.
 
     Returns dict with keys: benchmark, precision_5, recall_5, f1_5,
         precision_10, recall_10, f1_10
@@ -87,12 +87,17 @@ def load_run_test_row_from_evals(run_dir: Path) -> dict:
 
     benchmark = config.get("dataset", config.get("benchmark", "unknown"))
 
-    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
-    if not eval_files:
-        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+    if eval_file is not None:
+        eval_path = run_dir / "evals" / eval_file
+        if not eval_path.exists():
+            raise FileNotFoundError(f"Eval file not found: {eval_path}")
+    else:
+        eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+        if not eval_files:
+            raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+        eval_files.sort(reverse=True)
+        eval_path = eval_files[0]
 
-    eval_files.sort(reverse=True)
-    eval_path = eval_files[0]
     with open(eval_path) as f:
         eval_data = json.load(f)
 
@@ -145,36 +150,20 @@ def load_seke_row(seke_evals_path: Path) -> pl.DataFrame:
     )
 
 
-def load_young_haze_row(young_haze_dir: Path) -> pl.DataFrame:
-    """Load young-haze model metrics from eval JSON."""
-    eval_path = young_haze_dir / "evals" / "eval_kp20k_test_20260812T122055Z.json"
-    with open(eval_path) as f:
-        eval_data = json.load(f)
-    m = eval_data["metrics"]
-
-    return pl.DataFrame(
-        [
-            {
-                "run": "Ours",
-                "precision_5": m["precision@5"],
-                "precision_10": m["precision@10"],
-                "recall_5": m["recall@5"],
-                "recall_10": m["recall@10"],
-                "f1_5": m["f1@5"],
-                "f1_10": m["f1@10"],
-                "n_epochs": "20",
-            }
-        ]
-    )
-
-
-def load_per_doc_data(run_dir: Path) -> tuple[list[dict], pl.DataFrame]:
+def load_per_doc_data(
+    run_dir: Path, eval_file: str | None = None
+) -> tuple[list[dict], pl.DataFrame]:
     """Load per-document evaluation data with match classification and accuracy tiers."""
-    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
-    if not eval_files:
-        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
-    eval_files.sort(reverse=True)
-    eval_path = eval_files[0]
+    if eval_file is not None:
+        eval_path = run_dir / "evals" / eval_file
+        if not eval_path.exists():
+            raise FileNotFoundError(f"Eval file not found: {eval_path}")
+    else:
+        eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+        if not eval_files:
+            raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+        eval_files.sort(reverse=True)
+        eval_path = eval_files[0]
     with open(eval_path) as f:
         eval_data = json.load(f)
     per_doc = eval_data["per_doc"]
@@ -367,17 +356,24 @@ def build_keyphrase_count_summary(per_doc_df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(summary_rows)
 
 
-def load_all_benchmark_per_doc(run_dir: Path) -> dict[str, list[dict]]:
-    """Load per-doc data from all eval JSONs in a run's evals directory.
+def load_all_benchmark_per_doc(
+    run_dir: Path, eval_file: str | None = None
+) -> dict[str, list[dict]]:
+    """Load per-doc data from eval JSONs in a run's evals directory.
 
-    Scans run_dir/evals/ for eval_*_test_*.json files, extracts benchmark
-    name from filename, and returns {benchmark: per_doc_list, ...}.
-    When multiple evals exist for the same benchmark, picks the one with
-    the most per-doc entries.
+    If eval_file is provided, loads that specific file and returns
+    {benchmark: per_doc_list} where benchmark is extracted from the filename.
+    Otherwise, scans for all eval_*_test_*.json files.
     """
-    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
-    if not eval_files:
-        raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
+    if eval_file is not None:
+        eval_path = run_dir / "evals" / eval_file
+        if not eval_path.exists():
+            raise FileNotFoundError(f"Eval file not found: {eval_path}")
+        eval_files = [eval_path]
+    else:
+        eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+        if not eval_files:
+            raise FileNotFoundError(f"No eval test files found in {run_dir / 'evals'}")
 
     result: dict[str, tuple[int, list[dict]]] = {}
     for eval_path in eval_files:
