@@ -12,7 +12,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from keyword_pecker.data import KP20K_TRAINING_SET_EVAL_FILE, RUNS_MAPPING_PATH
+from keyword_pecker.data import RUNS_MAPPING_PATH
 from keyword_pecker.data.external import (
     BENCHMARKS_EVALS_PATH,
     SEKE_TRAINSET_PATH,
@@ -28,7 +28,9 @@ def load_runs_mapping() -> dict:
         return json.load(f)
 
 
-def check_run_folder(run_id: str, requires_metrics: bool = False) -> list[str]:
+def check_run_folder(
+    run_id: str, eval_file: str | None = None, requires_metrics: bool = False
+) -> list[str]:
     run_dir = get_runs_root() / run_id
     issues = []
 
@@ -39,9 +41,14 @@ def check_run_folder(run_id: str, requires_metrics: bool = False) -> list[str]:
     if not config_path.exists():
         issues.append(f"Missing config.json in {run_dir}")
 
-    eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
-    if not eval_files:
-        issues.append(f"No eval test files found in {run_dir / 'evals'}")
+    if eval_file is not None:
+        eval_path = run_dir / "evals" / eval_file
+        if not eval_path.exists():
+            issues.append(f"Missing eval file: {eval_file} in {run_dir / 'evals'}")
+    else:
+        eval_files = list((run_dir / "evals").glob("eval_*_test_*.json"))
+        if not eval_files:
+            issues.append(f"No eval test files found in {run_dir / 'evals'}")
 
     if requires_metrics:
         metrics_path = run_dir / "metrics.json"
@@ -85,8 +92,11 @@ def validate_prerequisites() -> bool:
     print("Checking run folders...")
     for name, info in mapping.items():
         run_id = info["run_id"]
+        eval_file = info.get("eval_file")
         requires_metrics = name == "kp20k_training_set"
-        issues = check_run_folder(run_id, requires_metrics=requires_metrics)
+        issues = check_run_folder(
+            run_id, eval_file=eval_file, requires_metrics=requires_metrics
+        )
         if issues:
             all_ok = False
             for issue in issues:
@@ -146,10 +156,12 @@ def run_make_tables(fig_dir: Path, save: bool) -> None:
     from keyword_pecker.data.paths import get_dataset_folder
 
     runs_root = get_runs_root()
-    yh_dir = runs_root / "young-haze-50"
-    cs_dir = runs_root / "curious-smoke-52"
-    do_dir = runs_root / "dutiful-oath-53"
-    sb_dir = runs_root / "spring-bird-54"
+    mapping = load_runs_mapping()
+    run_dirs = {name: runs_root / info["run_id"] for name, info in mapping.items()}
+    yh_dir = run_dirs["kp20k_training_set"]
+    cs_dir = run_dirs["kp20k_validation_set"]
+    do_dir = run_dirs["kptimes_validation_set"]
+    sb_dir = run_dirs["inspec_validation_set"]
     data_root = get_dataset_folder()
     benchmarks = ["kp20k", "kptimes", "inspec"]
 
@@ -171,7 +183,9 @@ def run_make_tables(fig_dir: Path, save: bool) -> None:
             "f1_10": row["f1_10"],
         }
 
-    yh_row = load_run_test_row_from_evals(yh_dir)
+    yh_row = load_run_test_row_from_evals(
+        yh_dir, mapping["kp20k_training_set"]["eval_file"]
+    )
     training_set_results = {
         "SEKE (Martinc et al, 2025)": seke_training.get(
             "SEKE (Martinc et al, 2025)", {}
@@ -188,9 +202,15 @@ def run_make_tables(fig_dir: Path, save: bool) -> None:
         },
     }
 
-    cs_row = load_run_test_row_from_evals(cs_dir)
-    do_row = load_run_test_row_from_evals(do_dir)
-    sb_row = load_run_test_row_from_evals(sb_dir)
+    cs_row = load_run_test_row_from_evals(
+        cs_dir, mapping["kp20k_validation_set"]["eval_file"]
+    )
+    do_row = load_run_test_row_from_evals(
+        do_dir, mapping["kptimes_validation_set"]["eval_file"]
+    )
+    sb_row = load_run_test_row_from_evals(
+        sb_dir, mapping["inspec_validation_set"]["eval_file"]
+    )
     validation_set_results = {
         "SEKE (Martinc et al, 2025)": seke_validation.get(
             "SEKE (Martinc et al, 2025)", {}
@@ -230,14 +250,24 @@ def run_make_tables(fig_dir: Path, save: bool) -> None:
         training_set_results, validation_set_results
     )
 
-    per_doc, per_doc_df_raw = load_per_doc_data(yh_dir)
+    per_doc, per_doc_df_raw = load_per_doc_data(
+        yh_dir, mapping["kp20k_training_set"]["eval_file"]
+    )
     per_doc_df = assign_accuracy_tiers(per_doc_df_raw)
     samples = select_samples(per_doc_df, per_doc)
 
-    training_per_doc = load_all_benchmark_per_doc(yh_dir)
+    training_per_doc = load_all_benchmark_per_doc(
+        yh_dir, mapping["kp20k_training_set"]["eval_file"]
+    )
     validation_per_doc = {}
-    for run_dir in [cs_dir, do_dir, sb_dir]:
-        validation_per_doc.update(load_all_benchmark_per_doc(run_dir))
+    for name in [
+        "kp20k_validation_set",
+        "kptimes_validation_set",
+        "inspec_validation_set",
+    ]:
+        validation_per_doc.update(
+            load_all_benchmark_per_doc(run_dirs[name], mapping[name]["eval_file"])
+        )
 
     keyphrase_stats = build_keyphrase_stats_table(training_per_doc, validation_per_doc)
 
@@ -306,9 +336,11 @@ def run_error_analysis(fig_dir: Path, save: bool) -> None:
     )
 
     runs_root = get_runs_root()
-    yh_dir = runs_root / "young-haze-50"
+    mapping = load_runs_mapping()
+    yh_dir = runs_root / mapping["kp20k_training_set"]["run_id"]
+    eval_file = mapping["kp20k_training_set"]["eval_file"]
 
-    eval_path = yh_dir / "evals" / KP20K_TRAINING_SET_EVAL_FILE
+    eval_path = yh_dir / "evals" / eval_file
     if not eval_path.exists():
         raise FileNotFoundError(f"Missing eval file: {eval_path}")
 
