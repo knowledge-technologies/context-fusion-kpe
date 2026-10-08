@@ -25,6 +25,7 @@ from keyword_pecker.analysis import (
     plot_ecdf_confidence,
     plot_stacked_bar_match_type,
 )
+from keyword_pecker.data import RUNS_MAPPING_PATH
 from keyword_pecker.utils import get_runs_root
 
 load_dotenv()
@@ -35,8 +36,12 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 
 RUNS_ROOT = get_runs_root()
-YOUNG_HAZE_DIR = RUNS_ROOT / "young-haze-50"
-EVAL_PATH = YOUNG_HAZE_DIR / "evals" / "eval_kp20k_test_20260812T122055Z.json"
+
+with open(RUNS_MAPPING_PATH) as f:
+    MAPPING = json.load(f)
+
+YOUNG_HAZE_DIR = RUNS_ROOT / MAPPING["kp20k_training_set"]["run_id"]
+EVAL_PATH = YOUNG_HAZE_DIR / "evals" / MAPPING["kp20k_training_set"]["eval_file"]
 
 
 def parse_args() -> argparse.Namespace:

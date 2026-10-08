@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -40,6 +41,12 @@ from keyword_pecker.analysis import (
     select_samples,
 )
 from keyword_pecker.data.paths import get_dataset_folder
+from keyword_pecker.data import RUNS_MAPPING_PATH
+from keyword_pecker.data.external import (
+    BENCHMARKS_EVALS_PATH,
+    SEKE_TRAINSET_PATH,
+    SEKE_VALSET_PATH,
+)
 from keyword_pecker.utils import get_runs_root
 
 load_dotenv()
@@ -51,17 +58,10 @@ load_dotenv()
 
 RUNS_ROOT = get_runs_root()
 
-YOUNG_HAZE_DIR = RUNS_ROOT / "young-haze-50"
-CURIOUS_SMOKE_52_DIR = RUNS_ROOT / "curious-smoke-52"
-DUTIFUL_OATH_53_DIR = RUNS_ROOT / "dutiful-oath-53"
-SPRING_BIRD_54_DIR = RUNS_ROOT / "spring-bird-54"
+with open(RUNS_MAPPING_PATH) as f:
+    MAPPING = json.load(f)
 
-EXTERNAL_DIR = (
-    Path(__file__).parent.parent / "notebooks" / "2026-08-05_young-haze" / "external"
-)
-SEKE_TRAINSET_PATH = EXTERNAL_DIR / "seke_evals_trainset.json"
-SEKE_VALSET_PATH = EXTERNAL_DIR / "seke_evals_valset.json"
-BENCHMARKS_EVALS_PATH = EXTERNAL_DIR / "benchmarks_evals.json"
+RUN_DIRS = {name: RUNS_ROOT / info["run_id"] for name, info in MAPPING.items()}
 
 DATA_ROOT = get_dataset_folder()
 BENCHMARKS = ["kp20k", "kptimes", "inspec"]
@@ -120,7 +120,9 @@ def main() -> None:
     # Load run results
     # ------------------------------------------------------------------
 
-    yh_row = load_run_test_row_from_evals(YOUNG_HAZE_DIR)
+    yh_row = load_run_test_row_from_evals(
+        RUN_DIRS["kp20k_training_set"], MAPPING["kp20k_training_set"]["eval_file"]
+    )
     training_set_results = {
         "SEKE (Martinc et al, 2025)": seke_training.get(
             "SEKE (Martinc et al, 2025)", {}
@@ -137,9 +139,16 @@ def main() -> None:
         },
     }
 
-    cs_row = load_run_test_row_from_evals(CURIOUS_SMOKE_52_DIR)
-    do_row = load_run_test_row_from_evals(DUTIFUL_OATH_53_DIR)
-    sb_row = load_run_test_row_from_evals(SPRING_BIRD_54_DIR)
+    cs_row = load_run_test_row_from_evals(
+        RUN_DIRS["kp20k_validation_set"], MAPPING["kp20k_validation_set"]["eval_file"]
+    )
+    do_row = load_run_test_row_from_evals(
+        RUN_DIRS["kptimes_validation_set"],
+        MAPPING["kptimes_validation_set"]["eval_file"],
+    )
+    sb_row = load_run_test_row_from_evals(
+        RUN_DIRS["inspec_validation_set"], MAPPING["inspec_validation_set"]["eval_file"]
+    )
     validation_set_results = {
         "SEKE (Martinc et al, 2025)": seke_validation.get(
             "SEKE (Martinc et al, 2025)", {}
@@ -183,14 +192,24 @@ def main() -> None:
         training_set_results, validation_set_results
     )
 
-    per_doc, per_doc_df_raw = load_per_doc_data(YOUNG_HAZE_DIR)
+    per_doc, per_doc_df_raw = load_per_doc_data(
+        RUN_DIRS["kp20k_training_set"], MAPPING["kp20k_training_set"]["eval_file"]
+    )
     per_doc_df = assign_accuracy_tiers(per_doc_df_raw)
     samples = select_samples(per_doc_df, per_doc)
 
-    training_per_doc = load_all_benchmark_per_doc(YOUNG_HAZE_DIR)
+    training_per_doc = load_all_benchmark_per_doc(
+        RUN_DIRS["kp20k_training_set"], MAPPING["kp20k_training_set"]["eval_file"]
+    )
     validation_per_doc = {}
-    for run_dir in [CURIOUS_SMOKE_52_DIR, DUTIFUL_OATH_53_DIR, SPRING_BIRD_54_DIR]:
-        validation_per_doc.update(load_all_benchmark_per_doc(run_dir))
+    for name in [
+        "kp20k_validation_set",
+        "kptimes_validation_set",
+        "inspec_validation_set",
+    ]:
+        validation_per_doc.update(
+            load_all_benchmark_per_doc(RUN_DIRS[name], MAPPING[name]["eval_file"])
+        )
 
     keyphrase_stats = build_keyphrase_stats_table(training_per_doc, validation_per_doc)
 
@@ -212,14 +231,20 @@ def main() -> None:
     # Dataset statistics
     # ------------------------------------------------------------------
 
-    print("Computing dataset statistics...")
     dataset_stats = {}
     for bm in BENCHMARKS:
         json_path = DATA_ROOT / bm / f"{bm}_valid.json"
         parquet_path = DATA_ROOT / bm / "derived" / "valid.parquet"
+        if not json_path.exists() or not parquet_path.exists():
+            print(f"⚠ Dataset files missing for {bm} — skipping dataset stats")
+            break
         dataset_stats[bm] = compute_dataset_stats(json_path, parquet_path)
 
-    make_dataset_stats_tex(dataset_stats, fig_dir=fig_dir, save=save)
+    if dataset_stats:
+        print("Computing dataset statistics...")
+        make_dataset_stats_tex(dataset_stats, fig_dir=fig_dir, save=save)
+    else:
+        print("⚠ Skipping dataset stats (no dataset files found)")
 
     # ------------------------------------------------------------------
     # Precision/recall table
@@ -248,7 +273,7 @@ def main() -> None:
 
     print("Loading training metrics...")
     yh_all_metrics, yh_raw_loss, yh_epoch_mean_loss = load_training_metrics(
-        YOUNG_HAZE_DIR
+        RUN_DIRS["kp20k_training_set"]
     )
 
     print("Plotting loss overview...")
@@ -269,7 +294,7 @@ def main() -> None:
     # ------------------------------------------------------------------
 
     print("Loading validation metrics...")
-    yh_all_val_metrics = load_all_val_metrics(YOUNG_HAZE_DIR)
+    yh_all_val_metrics = load_all_val_metrics(RUN_DIRS["kp20k_training_set"])
 
     print("Plotting ModernBERT dynamics...")
     plot_modernbert_dynamics(yh_all_val_metrics, fig_dir=fig_dir, save=save)
