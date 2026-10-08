@@ -68,8 +68,6 @@ from keyword_pecker.data.external import (
 
 RUNS_MAPPING_PATH = Path(__file__).parent / "runs.json"
 
-KP20K_TRAINING_SET_EVAL_FILE = "eval_kp20k_test_20260812T122055Z.json"
-
 __all__ = [
     # Path utilities
     "ensure_derived_dir",
@@ -80,8 +78,6 @@ __all__ = [
     "list_dataset_files",
     # Runs mapping
     "RUNS_MAPPING_PATH",
-    # Manuscript constants
-    "KP20K_TRAINING_SET_EVAL_FILE",
     # External data paths
     "BENCHMARKS_EVALS_PATH",
     "EXTERNAL_DIR",
