@@ -34,7 +34,7 @@ evaluation:
 
 wandb:
   enabled: false            # set to true or pass --wandb to train.py to enable
-  project: "keyword-pecker" # overridden by WANDB_PROJECT env var if set
+  project: "ctx-fusion" # overridden by WANDB_PROJECT env var if set
   entity: null              # overridden by WANDB_ENTITY env var if set
   tags: []
   notes: ""

@@ -1,5 +1,5 @@
 [project]
-name = "keyword-pecker"
+name = "ctx-fusion"
 version = "0.2.0"
 description = "Add your description here"
 readme = "README.md"
@@ -31,8 +31,8 @@ tracking = ["wandb>=0.19"]
 en_core_web_sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
 
 [project.scripts]
-keyword-pecker = "keyword_pecker:main"
-reproduce-manuscript-artifacts = "keyword_pecker.cli.reproduce:main"
+ctx-fusion = "ctx_fusion:main"
+reproduce-manuscript-artifacts = "ctx_fusion.cli.reproduce:main"
 
 [build-system]
 requires = ["uv_build>=0.9.16,<0.10.0"]

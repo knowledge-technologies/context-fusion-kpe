@@ -14,7 +14,7 @@ From: python:3.13
     export PATH="/usr/local/bin:$PATH"
 
     # Install all dependencies (core + wandb tracking extra) into /opt/venv.
-    # keyword-pecker itself is not installed here; it is provided at runtime
+    # ctx-fusion itself is not installed here; it is provided at runtime
     # via the /workspace bind mount + PYTHONPATH=/workspace/src.
     uv venv --seed /opt/venv
     uv pip install --python /opt/venv \

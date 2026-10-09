@@ -316,6 +316,76 @@ wheels = [
 ]
 
 [[package]]
+name = "ctx-fusion"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "en-core-web-sm" },
+    { name = "nltk" },
+    { name = "numpy" },
+    { name = "pip" },
+    { name = "polars" },
+    { name = "protobuf" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "regex" },
+    { name = "sentencepiece" },
+    { name = "spacy" },
+    { name = "torch" },
+    { name = "tqdm" },
+    { name = "transformers" },
+]
+
+[package.optional-dependencies]
+tracking = [
+    { name = "wandb" },
+]
+
+[package.dev-dependencies]
+analysis = [
+    { name = "great-tables" },
+    { name = "matplotlib" },
+    { name = "pillow" },
+    { name = "selenium" },
+]
+dev = [
+    { name = "marimo" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
+    { name = "nltk", specifier = ">=3.9.2" },
+    { name = "numpy", specifier = ">=2.4.2" },
+    { name = "pip", specifier = ">=26.0.1" },
+    { name = "polars", specifier = ">=1.38.1" },
+    { name = "protobuf", specifier = ">=5.0" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "regex", specifier = ">=2026.1.15" },
+    { name = "sentencepiece", specifier = ">=0.2.1" },
+    { name = "spacy", specifier = ">=3.8.11" },
+    { name = "torch", specifier = ">=2.10.0" },
+    { name = "tqdm", specifier = ">=4.67.3" },
+    { name = "transformers", specifier = ">=5.1.0" },
+    { name = "wandb", marker = "extra == 'tracking'", specifier = ">=0.19" },
+]
+provides-extras = ["tracking"]
+
+[package.metadata.requires-dev]
+analysis = [
+    { name = "great-tables", specifier = ">=0.10.0" },
+    { name = "matplotlib", specifier = ">=3.10.0" },
+    { name = "pillow", specifier = ">=10.0.0" },
+    { name = "selenium", specifier = ">=4.0.0" },
+]
+dev = [
+    { name = "marimo", specifier = ">=0.20.2" },
+    { name = "pytest", specifier = ">=9.0.2" },
+]
+
+[[package]]
 name = "cuda-bindings"
 version = "12.9.4"
 source = { registry = "https://pypi.org/simple" }
@@ -688,76 +758,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
-]
-
-[[package]]
-name = "keyword-pecker"
-version = "0.2.0"
-source = { editable = "." }
-dependencies = [
-    { name = "en-core-web-sm" },
-    { name = "nltk" },
-    { name = "numpy" },
-    { name = "pip" },
-    { name = "polars" },
-    { name = "protobuf" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "sentencepiece" },
-    { name = "spacy" },
-    { name = "torch" },
-    { name = "tqdm" },
-    { name = "transformers" },
-]
-
-[package.optional-dependencies]
-tracking = [
-    { name = "wandb" },
-]
-
-[package.dev-dependencies]
-analysis = [
-    { name = "great-tables" },
-    { name = "matplotlib" },
-    { name = "pillow" },
-    { name = "selenium" },
-]
-dev = [
-    { name = "marimo" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "en-core-web-sm", url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" },
-    { name = "nltk", specifier = ">=3.9.2" },
-    { name = "numpy", specifier = ">=2.4.2" },
-    { name = "pip", specifier = ">=26.0.1" },
-    { name = "polars", specifier = ">=1.38.1" },
-    { name = "protobuf", specifier = ">=5.0" },
-    { name = "python-dotenv", specifier = ">=1.2.1" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "regex", specifier = ">=2026.1.15" },
-    { name = "sentencepiece", specifier = ">=0.2.1" },
-    { name = "spacy", specifier = ">=3.8.11" },
-    { name = "torch", specifier = ">=2.10.0" },
-    { name = "tqdm", specifier = ">=4.67.3" },
-    { name = "transformers", specifier = ">=5.1.0" },
-    { name = "wandb", marker = "extra == 'tracking'", specifier = ">=0.19" },
-]
-provides-extras = ["tracking"]
-
-[package.metadata.requires-dev]
-analysis = [
-    { name = "great-tables", specifier = ">=0.10.0" },
-    { name = "matplotlib", specifier = ">=3.10.0" },
-    { name = "pillow", specifier = ">=10.0.0" },
-    { name = "selenium", specifier = ">=4.0.0" },
-]
-dev = [
-    { name = "marimo", specifier = ">=0.20.2" },
-    { name = "pytest", specifier = ">=9.0.2" },
 ]
 
 [[package]]
