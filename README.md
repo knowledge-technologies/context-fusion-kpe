@@ -1,6 +1,13 @@
-# Keyword-pecker
+<h1 align="center">Fusing Sentence-Level and Document-Level Representations for Keyphrase Extraction</h1>
 
-Transformer-based keyphrase extraction model.
+Transformer-based keyphrase extraction model using mixed-resolution represenetation of context.
+
+<div align="center">
+
+<img src="./doc/img/architecture_diagram.svg" width="300" alt="Architecture diagram">
+
+</div>
+
 
 ## Prerequisites
 
@@ -14,7 +21,7 @@ Clone the repository and install dependencies:
 
 ```bash
 git clone <repository-url>
-cd keyword-pecker
+cd ctx-fusion
 uv sync
 ```
 
@@ -52,7 +59,7 @@ For cluster environments, build a Singularity/Apptainer image:
    DATASET_FOLDER=/path/to/your/dataset/location
    EXPERIMENT_RUNS_FOLDER=/path/to/your/runs/location
    WANDB_API_KEY=
-   WANDB_PROJECT=keyword-pecker
+   WANDB_PROJECT=ctx-fusion
    SLURM_EMAIL=your-email@example.com
    ```
 
@@ -230,7 +237,7 @@ manuscript-artifacts/
 | `kptimes_validation_set` | `dutiful-oath-53` | kptimes |
 | `inspec_validation_set` | `spring-bird-54` | inspec |
 
-See `src/keyword_pecker/data/runs.json` for the full mapping.
+See `src/ctx_fusion/data/runs.json` for the full mapping.
 
 ### Generate Artifacts
 
