@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlparse
 
 from dotenv import load_dotenv
 
-from keyword_pecker.utils import load_config, get_logger
+from ctx_fusion.utils import load_config, get_logger
 
 logger = get_logger(name="download_datasets")
 
@@ -100,7 +100,7 @@ def list_datasets(datasets_config: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Download datasets for keyword-pecker.",
+        description="Download datasets for ctx-fusion.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )

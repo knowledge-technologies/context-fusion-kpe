@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from keyword_pecker.analysis import (
+from ctx_fusion.analysis import (
     assign_accuracy_tiers,
     build_f1_table_wide,
     build_keyphrase_stats_table,
@@ -40,14 +40,14 @@ from keyword_pecker.analysis import (
     plot_training_dynamics,
     select_samples,
 )
-from keyword_pecker.data.paths import get_dataset_folder
-from keyword_pecker.data import RUNS_MAPPING_PATH
-from keyword_pecker.data.external import (
+from ctx_fusion.data.paths import get_dataset_folder
+from ctx_fusion.data import RUNS_MAPPING_PATH
+from ctx_fusion.data.external import (
     BENCHMARKS_EVALS_PATH,
     SEKE_TRAINSET_PATH,
     SEKE_VALSET_PATH,
 )
-from keyword_pecker.utils import get_runs_root
+from ctx_fusion.utils import get_runs_root
 
 load_dotenv()
 

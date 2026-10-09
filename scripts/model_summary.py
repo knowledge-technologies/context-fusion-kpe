@@ -14,8 +14,8 @@ from pathlib import Path
 import polars as pl
 import torch
 
-from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.utils.config import load_config
+from ctx_fusion.models import KeyphraseModel
+from ctx_fusion.utils.config import load_config
 
 
 def count_params(module: torch.nn.Module) -> tuple[int, int, int]:

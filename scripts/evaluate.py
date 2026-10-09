@@ -18,11 +18,11 @@ from pathlib import Path
 import polars as pl
 import torch
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
-from keyword_pecker.data import get_derived_path
-from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer import evaluate_model
-from keyword_pecker.utils import get_logger, get_runs_root, load_config
+from ctx_fusion.constants import DEFAULT_DISALLOWED_PUNCTUATION
+from ctx_fusion.data import get_derived_path
+from ctx_fusion.models import KeyphraseModel
+from ctx_fusion.trainer import evaluate_model
+from ctx_fusion.utils import get_logger, get_runs_root, load_config
 
 logger = get_logger("evaluate")
 

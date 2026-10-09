@@ -17,7 +17,7 @@ import numpy as np
 import polars as pl
 from dotenv import load_dotenv
 
-from keyword_pecker.analysis import (
+from ctx_fusion.analysis import (
     assign_accuracy_tiers,
     build_keyphrase_count_summary,
     build_keyphrase_level_df,
@@ -25,8 +25,8 @@ from keyword_pecker.analysis import (
     plot_ecdf_confidence,
     plot_stacked_bar_match_type,
 )
-from keyword_pecker.data import RUNS_MAPPING_PATH
-from keyword_pecker.utils import get_runs_root
+from ctx_fusion.data import RUNS_MAPPING_PATH
+from ctx_fusion.utils import get_runs_root
 
 load_dotenv()
 

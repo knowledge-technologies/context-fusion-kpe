@@ -32,7 +32,7 @@ from nltk.stem.porter import PorterStemmer
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from keyword_pecker.data import (
+from ctx_fusion.data import (
     ensure_derived_dir,
     get_dataset_path,
     get_derived_path,
@@ -42,7 +42,7 @@ from keyword_pecker.data import (
     process_dataset,
     write_parquet,
 )
-from keyword_pecker.utils import get_logger, load_config
+from ctx_fusion.utils import get_logger, load_config
 
 logger = get_logger("prepare_data")
 

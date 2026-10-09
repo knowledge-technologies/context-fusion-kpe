@@ -26,11 +26,11 @@ import polars as pl
 import torch
 from dotenv import load_dotenv
 
-from keyword_pecker import GIT_COMMIT
-from keyword_pecker.data import compute_class_weights, get_derived_path
-from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer import evaluate_model, train
-from keyword_pecker.utils import get_logger, init_run_dir, load_config, setup_wandb
+from ctx_fusion import GIT_COMMIT
+from ctx_fusion.data import compute_class_weights, get_derived_path
+from ctx_fusion.models import KeyphraseModel
+from ctx_fusion.trainer import evaluate_model, train
+from ctx_fusion.utils import get_logger, init_run_dir, load_config, setup_wandb
 
 load_dotenv()
 
