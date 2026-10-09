@@ -23,5 +23,8 @@ notebooks/*/slides_files/*
 # wandb logs
 /wandb
 
+# Auto-generated version file
+src/ctx_fusion/_version.py
+
 # MyST build outputs
 _build
