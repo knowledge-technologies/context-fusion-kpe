@@ -1,6 +1,6 @@
 <h1 align="center">Fusing Sentence-Level and Document-Level Representations for Keyphrase Extraction</h1>
 
-Transformer-based keyphrase extraction model using mixed-resolution represenetation of context.
+Transformer-based keyphrase extraction model fusing sentence and document-level representations of context.
 
 <div align="center">
 
