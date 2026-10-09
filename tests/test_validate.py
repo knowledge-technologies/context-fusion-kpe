@@ -1,6 +1,6 @@
 from numpy.testing import assert_approx_equal
 
-from keyword_pecker.trainer.validate import (
+from ctx_fusion.trainer.validate import (
     _build_sample,
     _compute_per_doc_metrics,
     compute_metrics_at_k,
@@ -220,7 +220,7 @@ def test_compute_metrics_at_k_martinc_key_naming():
 
 def test_normalize_keyphrases_hyphen_and_case():
     """Test that _normalize_keyphrases replaces hyphens with spaces and lowercases."""
-    from keyword_pecker.trainer.validate import _normalize_keyphrases
+    from ctx_fusion.trainer.validate import _normalize_keyphrases
 
     gold = [["Value Based", "NEURAL NETWORK"]]
     pred = [["value-based", "neural-network"]]
@@ -234,7 +234,7 @@ def test_normalize_keyphrases_hyphen_and_case():
 
 def test_normalize_keyphrases_empty():
     """Test that _normalize_keyphrases handles empty lists."""
-    from keyword_pecker.trainer.validate import _normalize_keyphrases
+    from ctx_fusion.trainer.validate import _normalize_keyphrases
 
     assert _normalize_keyphrases([[]]) == [[]]
     assert _normalize_keyphrases([]) == []
@@ -242,7 +242,7 @@ def test_normalize_keyphrases_empty():
 
 def test_compute_confusion_matrix_basic():
     """Test _compute_confusion_matrix with mixed correct/incorrect predictions."""
-    from keyword_pecker.trainer.validate import _compute_confusion_matrix
+    from ctx_fusion.trainer.validate import _compute_confusion_matrix
 
     predictions = [0, 2, 1]
     targets = [0, 1, 2]
@@ -254,7 +254,7 @@ def test_compute_confusion_matrix_basic():
 
 def test_compute_confusion_matrix_perfect():
     """Test _compute_confusion_matrix with perfect predictions (diagonal only)."""
-    from keyword_pecker.trainer.validate import _compute_confusion_matrix
+    from ctx_fusion.trainer.validate import _compute_confusion_matrix
 
     predictions = [0, 1, 2, 0, 1]
     targets = [0, 1, 2, 0, 1]
