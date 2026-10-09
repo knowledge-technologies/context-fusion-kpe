@@ -9,7 +9,7 @@ Main components:
   tokenization, and Parquet I/O)
 
 Example usage:
-    from keyword_pecker.data import (
+    from ctx_fusion.data import (
         get_dataset_path,
         get_derived_path,
         load_spacy_model,
@@ -29,7 +29,7 @@ Example usage:
 
 from pathlib import Path
 
-from keyword_pecker.data.paths import (
+from ctx_fusion.data.paths import (
     ensure_derived_dir,
     get_dataset_folder,
     get_dataset_path,
@@ -37,7 +37,7 @@ from keyword_pecker.data.paths import (
     get_metadata_path,
     list_dataset_files,
 )
-from keyword_pecker.data.preprocessing import (
+from ctx_fusion.data.preprocessing import (
     SENTENCE_SCHEMA,
     build_keyword_regex,
     collect_sentences,
@@ -55,11 +55,11 @@ from keyword_pecker.data.preprocessing import (
     word_ranges_to_token_ranges,
     write_parquet,
 )
-from keyword_pecker.data.dataset import (
+from ctx_fusion.data.dataset import (
     compute_class_weights,
     create_keyphrase_dataloader,
 )
-from keyword_pecker.data.external import (
+from ctx_fusion.data.external import (
     BENCHMARKS_EVALS_PATH,
     EXTERNAL_DIR,
     SEKE_TRAINSET_PATH,

@@ -6,7 +6,7 @@ It supports evaluating any dataset split (e.g. "val", "test") by passing the
 ``split`` parameter to :func:`evaluate_model`.
 
 Metrics are computed using the external eval module from TNT-KID
-(:mod:`keyword_pecker.trainer.external.eval`), which applies Porter stemming
+(:mod:`ctx_fusion.trainer.external.eval`), which applies Porter stemming
 before exact word-by-word matching and uses macro-averaging (average per-document
 P/R, then compute F1). This matches the evaluation methodology used in prior
 keyword extraction benchmarks.
@@ -25,15 +25,15 @@ import polars as pl
 import torch
 import tqdm
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
-from keyword_pecker.data import create_keyphrase_dataloader
-from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.models.inference import (
+from ctx_fusion.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
+from ctx_fusion.data import create_keyphrase_dataloader
+from ctx_fusion.models import KeyphraseModel
+from ctx_fusion.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
 )
-from keyword_pecker.trainer.external import eval as eval_martinc
-from keyword_pecker.utils import get_logger
+from ctx_fusion.trainer.external import eval as eval_martinc
+from ctx_fusion.utils import get_logger
 
 logger = get_logger("validate")
 
@@ -204,7 +204,7 @@ def compute_metrics_at_k_martinc(
 ) -> dict[str, float]:
     """Compute stemmed, macro-averaged @k metrics using the external eval module.
 
-    This function wraps :func:`keyword_pecker.trainer.external.eval.eval` to compute
+    This function wraps :func:`ctx_fusion.trainer.external.eval.eval` to compute
     precision@k, recall@k, and F1@k using Porter stemming and macro-averaging,
     matching the evaluation methodology from prior keyword extraction benchmarks.
 

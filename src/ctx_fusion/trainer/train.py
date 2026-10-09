@@ -17,16 +17,16 @@ import torch
 import tqdm
 from transformers import get_linear_schedule_with_warmup
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
-from keyword_pecker.data import compute_class_weights, create_keyphrase_dataloader
-from keyword_pecker.models import KeyphraseModel
-from keyword_pecker.trainer.early_stopping import EarlyStopping
-from keyword_pecker.trainer.validate import (
+from ctx_fusion.constants import DEFAULT_DISALLOWED_PUNCTUATION, IGNORE_IDX
+from ctx_fusion.data import compute_class_weights, create_keyphrase_dataloader
+from ctx_fusion.models import KeyphraseModel
+from ctx_fusion.trainer.early_stopping import EarlyStopping
+from ctx_fusion.trainer.validate import (
     _compute_confusion_matrix,
     _log_confusion_matrix_to_wandb,
     evaluate_model,
 )
-from keyword_pecker.utils import get_logger, set_random_seeds
+from ctx_fusion.utils import get_logger, set_random_seeds
 
 logger = get_logger("train")
 

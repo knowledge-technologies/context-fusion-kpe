@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
-from keyword_pecker.analysis.tables import BENCHMARK_COLORS
+from ctx_fusion.analysis.tables import BENCHMARK_COLORS
 
 if TYPE_CHECKING:
     from matplotlib.figure import Figure

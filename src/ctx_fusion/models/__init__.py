@@ -7,7 +7,7 @@ This module provides the neural network architectures for keyphrase extraction:
 - KeyphraseModel: Combined end-to-end model
 
 Typical usage:
-    from keyword_pecker.models import KeyphraseModel
+    from ctx_fusion.models import KeyphraseModel
 
     model = KeyphraseModel()
     logits = model(input_ids, attention_mask, sentence_counts)

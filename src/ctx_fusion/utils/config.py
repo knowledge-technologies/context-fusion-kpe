@@ -11,12 +11,12 @@ SINGULARITY_MOUNT_ROOT = "/workspace"
 def get_project_root() -> Path:
     """Return the project root directory.
 
-    Assumes the project structure has src/keyword_pecker/utils/config.py
+    Assumes the project structure has src/ctx_fusion/utils/config.py
     and returns the directory containing src/.
     """
     # Check if running in container with mounted workspace
     workspace = Path(SINGULARITY_MOUNT_ROOT)
-    if workspace.exists() and (workspace / "src" / "keyword_pecker").exists():
+    if workspace.exists() and (workspace / "src" / "ctx_fusion").exists():
         return workspace
 
     return Path(__file__).parent.parent.parent.parent

@@ -12,13 +12,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from keyword_pecker.data import RUNS_MAPPING_PATH
-from keyword_pecker.data.external import (
+from ctx_fusion.data import RUNS_MAPPING_PATH
+from ctx_fusion.data.external import (
     BENCHMARKS_EVALS_PATH,
     SEKE_TRAINSET_PATH,
     SEKE_VALSET_PATH,
 )
-from keyword_pecker.utils import get_runs_root
+from ctx_fusion.utils import get_runs_root
 
 load_dotenv()
 
@@ -71,7 +71,7 @@ def check_external_data() -> list[str]:
 
 
 def check_dataset_files(benchmarks: list[str]) -> tuple[bool, list[str]]:
-    from keyword_pecker.data.paths import get_dataset_folder
+    from ctx_fusion.data.paths import get_dataset_folder
 
     data_root = get_dataset_folder()
     missing = []
@@ -128,7 +128,7 @@ def validate_prerequisites() -> bool:
 
 
 def run_make_tables(fig_dir: Path, save: bool) -> None:
-    from keyword_pecker.analysis import (
+    from ctx_fusion.analysis import (
         assign_accuracy_tiers,
         build_f1_table_wide,
         build_keyphrase_stats_table,
@@ -153,7 +153,7 @@ def run_make_tables(fig_dir: Path, save: bool) -> None:
         plot_training_dynamics,
         select_samples,
     )
-    from keyword_pecker.data.paths import get_dataset_folder
+    from ctx_fusion.data.paths import get_dataset_folder
 
     runs_root = get_runs_root()
     mapping = load_runs_mapping()
@@ -327,7 +327,7 @@ def run_error_analysis(fig_dir: Path, save: bool) -> None:
     import numpy as np
     import polars as pl
 
-    from keyword_pecker.analysis import (
+    from ctx_fusion.analysis import (
         assign_accuracy_tiers,
         build_keyphrase_level_df,
         classify_match_type,

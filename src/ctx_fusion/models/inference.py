@@ -14,8 +14,8 @@ import spacy
 import torch
 from nltk.stem.porter import PorterStemmer
 
-from keyword_pecker.constants import DEFAULT_DISALLOWED_PUNCTUATION
-from keyword_pecker.data import extract_word_level_data, load_spacy_model
+from ctx_fusion.constants import DEFAULT_DISALLOWED_PUNCTUATION
+from ctx_fusion.data import extract_word_level_data, load_spacy_model
 from .keyphrase_model import KeyphraseModel
 
 
@@ -589,7 +589,7 @@ def predict_keyphrases(
             sorted by confidence (highest first).
 
     Example:
-        >>> from keyword_pecker.models import KeyphraseModel, predict_keyphrases
+        >>> from ctx_fusion.models import KeyphraseModel, predict_keyphrases
         >>> model = KeyphraseModel.from_pretrained("path/to/checkpoint")
         >>> keyphrases = predict_keyphrases(model, "Machine learning is a subset of AI.")
         >>> print(keyphrases)

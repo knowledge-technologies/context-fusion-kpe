@@ -1,6 +1,6 @@
 """Analysis module for young-haze keyword extraction evaluation."""
 
-from keyword_pecker.analysis.data_loading import (
+from ctx_fusion.analysis.data_loading import (
     BENCHMARKS,
     build_keyphrase_count_summary,
     build_keyphrase_level_df,
@@ -15,13 +15,13 @@ from keyword_pecker.analysis.data_loading import (
     load_seke_row,
     load_training_metrics,
 )
-from keyword_pecker.analysis.per_doc_analysis import (
+from ctx_fusion.analysis.per_doc_analysis import (
     assign_accuracy_tiers,
     build_keyphrase_stats_table,
     make_comparison_df,
     select_samples,
 )
-from keyword_pecker.analysis.plots import (
+from ctx_fusion.analysis.plots import (
     plot_ecdf_confidence,
     plot_keyphrase_stats,
     plot_loss_f1_overview,
@@ -30,7 +30,7 @@ from keyword_pecker.analysis.plots import (
     plot_stacked_bar_match_type,
     plot_training_dynamics,
 )
-from keyword_pecker.analysis.tables import (
+from ctx_fusion.analysis.tables import (
     BENCHMARK_COLORS,
     LATEX_COLOR_DEFINITIONS,
     build_f1_table_wide,

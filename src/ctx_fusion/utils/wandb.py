@@ -23,7 +23,7 @@ from datetime import datetime
 from typing import Any
 from dotenv import load_dotenv
 
-from keyword_pecker.utils.logging import get_logger
+from ctx_fusion.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -54,7 +54,7 @@ def setup_wandb(
         enabled: Whether to attempt W&B initialisation.
         config: Hyperparameter dict logged to ``wandb.config``.
         project: W&B project name.  Falls back to ``WANDB_PROJECT`` env var,
-            then ``"keyword-pecker"``.
+            then ``"ctx-fusion"``.
         entity: W&B entity (team/user).  Falls back to ``WANDB_ENTITY`` env var.
         tags: Optional list of tags attached to the run.
         notes: Free-text notes stored with the run.
@@ -72,11 +72,11 @@ def setup_wandb(
     except ImportError:
         logger.warning(
             "wandb is not installed — W&B tracking disabled. "
-            "Install it with: uv pip install 'keyword-pecker[tracking]'"
+            "Install it with: uv pip install 'ctx-fusion[tracking]'"
         )
         return None, _timestamp_name()
 
-    resolved_project = project or os.environ.get("WANDB_PROJECT", "keyword-pecker")
+    resolved_project = project or os.environ.get("WANDB_PROJECT", "ctx-fusion")
     resolved_entity = entity or os.environ.get("WANDB_ENTITY") or None
 
     run = wandb.init(

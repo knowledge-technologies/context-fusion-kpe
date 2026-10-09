@@ -19,7 +19,7 @@ import polars as pl
 import torch
 from torch.utils.data import Dataset, DataLoader, Sampler
 
-from keyword_pecker.constants import IGNORE_IDX
+from ctx_fusion.constants import IGNORE_IDX
 
 
 class KeyphraseDataset(Dataset):

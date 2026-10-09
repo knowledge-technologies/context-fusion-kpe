@@ -27,8 +27,8 @@ from nltk import word_tokenize
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from keyword_pecker.constants import IGNORE_IDX
-from keyword_pecker.utils import get_logger
+from ctx_fusion.constants import IGNORE_IDX
+from ctx_fusion.utils import get_logger
 
 logger = get_logger("preprocessing")
 
