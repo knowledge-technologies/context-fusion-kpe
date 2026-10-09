@@ -5,8 +5,8 @@ import torch
 from unittest.mock import MagicMock
 from transformers import AutoTokenizer
 
-from keyword_pecker.constants import IGNORE_IDX
-from keyword_pecker.data import (
+from ctx_fusion.constants import IGNORE_IDX
+from ctx_fusion.data import (
     build_keyword_regex,
     create_keyword_mask,
     pretokenize_sentence,

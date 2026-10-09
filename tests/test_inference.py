@@ -3,8 +3,8 @@
 import torch
 from transformers import AutoTokenizer
 
-from keyword_pecker.data import extract_word_level_data, pretokenize_sentence
-from keyword_pecker.models.inference import (
+from ctx_fusion.data import extract_word_level_data, pretokenize_sentence
+from ctx_fusion.models.inference import (
     aggregate_document_keyphrases,
     extract_ranked_keyphrases,
     _aggregate_tokens_to_words,

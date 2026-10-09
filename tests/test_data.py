@@ -1,12 +1,12 @@
 import polars as pl
 from numpy.testing import assert_approx_equal
 from transformers import AutoTokenizer
-from keyword_pecker.data import (
+from ctx_fusion.data import (
     compute_class_weights,
     extract_word_level_data,
     pretokenize_sentence,
 )
-from keyword_pecker.data.dataset import KeyphraseDataset, keyphrase_collate_fn
+from ctx_fusion.data.dataset import KeyphraseDataset, keyphrase_collate_fn
 
 _TOKENIZER = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
 

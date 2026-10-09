@@ -2,7 +2,7 @@
 
 import torch
 
-from keyword_pecker.models.refinement_encoder import RefinementEncoder
+from ctx_fusion.models.refinement_encoder import RefinementEncoder
 
 
 def test_refinement_head_forward_output_shape():

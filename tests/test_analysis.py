@@ -8,12 +8,12 @@ import polars as pl
 import pytest
 from numpy.testing import assert_approx_equal
 
-from keyword_pecker.analysis.per_doc_analysis import (
+from ctx_fusion.analysis.per_doc_analysis import (
     _compute_benchmark_stats,
     assign_accuracy_tiers,
     build_keyphrase_stats_table,
 )
-from keyword_pecker.analysis.tables import (
+from ctx_fusion.analysis.tables import (
     build_f1_table_wide,
     build_precision_recall_table,
     compute_dataset_stats,

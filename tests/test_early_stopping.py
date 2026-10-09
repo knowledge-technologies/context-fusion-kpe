@@ -1,4 +1,4 @@
-from keyword_pecker.trainer import EarlyStopping
+from ctx_fusion.trainer import EarlyStopping
 
 
 def test_early_stopping_max_mode():
