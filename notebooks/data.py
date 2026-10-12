@@ -1,12 +1,12 @@
 # /// script
 # dependencies = [
-#     "keyword-pecker",
+#     "ctx-fusion",
 #     "marimo",
 # ]
 # requires-python = ">=3.13"
 #
 # [tool.uv.sources]
-# keyword-pecker = { path = "../", editable = true }
+# ctx-fusion = { path = "../", editable = true }
 # ///
 
 import marimo
@@ -25,14 +25,14 @@ def _():
 
     import marimo as mo
 
-    from keyword_pecker.data import (
+    from ctx_fusion.data import (
         process_dataset,
         load_spacy_model,
         create_keyphrase_dataloader,
         SENTENCE_SCHEMA,
     )
-    from keyword_pecker.models import KeyphraseModel
-    from keyword_pecker.utils import load_config
+    from ctx_fusion.models import KeyphraseModel
+    from ctx_fusion.utils import load_config
 
     return (
         AutoTokenizer,

@@ -1,7 +1,7 @@
 [project]
 name = "ctx-fusion"
 version = "0.2.0"
-description = "Add your description here"
+description = "Keyphrase extraction with mixed-resolution fusion of target-token and document-context representations"
 readme = "README.md"
 authors = [
     { name = "Kristijan Armeni", email = "kristijan.armeni@gmail.com" }

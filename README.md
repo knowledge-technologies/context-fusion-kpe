@@ -33,8 +33,8 @@ See [`pyproject.toml`](pyproject.toml) for the full list of dependencies.
 Clone the repository and install dependencies:
 
 ```bash
-git clone <repository-url>
-cd ctx-fusion
+git clone https://github.com/knowledge-technologies/context-fusion-kpe.git
+cd context-fusion-kpe
 uv sync
 ```
 
@@ -180,7 +180,7 @@ uv run reproduce-manuscript-artifacts
 Or without installing:
 
 ```bash
-uvx --from git+https://github.com/<owner>/<repo_url> reproduce-manuscript-artifacts
+uvx --from git+https://github.com/knowledge-technologies/context-fusion-kpe reproduce-manuscript-artifacts
 ```
 
 > [!NOTE]
@@ -236,6 +236,14 @@ The Makefile provides targets for container management, remote execution, and de
 #### Remote execution
 
 Requires SSH + configured `.env`.
+
+Remote project and data directories default to `context-fusion-kpe`. Override
+`FOLDER_NAME`, `REMOTE_PROJECT_DIR`, or `REMOTE_DATA_DIR` in `.env` or on the
+`make` command line to use existing cluster directories. For example, an existing
+KT-GPU2 deployment can use `make sync FOLDER_NAME=keyword-pecker`.
+`LOCAL_RUNS_DIR` controls where `copy-run-folder` and `copy-run-model` save runs;
+it defaults to `EXPERIMENT_RUNS_FOLDER`, then `DATASET_FOLDER/runs`, then
+`~/data/context-fusion-kpe/runs`.
 
 | Target | Description |
 |---|---|

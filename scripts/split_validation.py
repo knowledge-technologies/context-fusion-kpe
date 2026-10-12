@@ -28,8 +28,8 @@ from pathlib import Path
 
 import polars as pl
 
-from keyword_pecker.data import get_derived_path, get_metadata_path
-from keyword_pecker.utils import get_logger
+from ctx_fusion.data import get_derived_path, get_metadata_path
+from ctx_fusion.utils import get_logger
 
 logger = get_logger("split_validation")
 
